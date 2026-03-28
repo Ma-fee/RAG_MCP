@@ -64,11 +64,11 @@
 
 ### Task 4: 端到端验收脚本与发布文档
 
-- [ ] Step 1 (Failing Test): 新增 `tests/e2e/test_v1_acceptance.py`，覆盖重建 -> keyword/vector 搜索 -> `rag://` 回读（stdio+HTTP）。
-- [ ] Step 2 (Verify Fail): 运行 `pytest tests/e2e/test_v1_acceptance.py -q`，预期 FAIL。
-- [ ] Step 3 (Minimal Code): 新增 `scripts/e2e_phase4_smoke.sh`，更新 `README.md` 运行手册与环境变量表。
-- [ ] Step 4 (Verify Pass): 运行 `pytest tests/e2e/test_v1_acceptance.py -q` 与 `bash scripts/e2e_phase4_smoke.sh`，预期 PASS。
-- [ ] Step 5 (Commit): `git add tests/e2e scripts/e2e_phase4_smoke.sh README.md pyproject.toml && git commit -m "docs: add v1 runbook and e2e smoke checks"`
+- [x] Step 1 (Failing Test): 新增 `tests/e2e/test_v1_acceptance.py`，覆盖重建 -> keyword/vector 搜索 -> `rag://` 回读（stdio+HTTP）。
+- [x] Step 2 (Verify Fail): 运行 `pytest tests/e2e/test_v1_acceptance.py -q`，预期 FAIL。
+- [x] Step 3 (Minimal Code): 新增 `scripts/e2e_phase4_smoke.sh`，更新 `README.md` 运行手册与环境变量表。
+- [x] Step 4 (Verify Pass): 运行 `pytest tests/e2e/test_v1_acceptance.py -q` 与 `bash scripts/e2e_phase4_smoke.sh`，预期 PASS。
+- [x] Step 5 (Commit): `git add tests/e2e scripts/e2e_phase4_smoke.sh README.md pyproject.toml && git commit -m "docs: add v1 runbook and e2e smoke checks"`
 
 ### Task 5: 全量回归与发布候选冻结
 
