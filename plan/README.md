@@ -14,7 +14,7 @@
 
 - [x] Phase 1: Keyword + Stdio 可用基线（可运行、可检索、可溯源）  
 文档: `plan/phase-1-keyword-stdio-mvp.md`
-- [ ] Phase 2: Vector + Chroma + Embedding 配置一致性  
+- [x] Phase 2: Vector + Chroma + Embedding 配置一致性  
 文档: `plan/phase-2-vector-chroma.md`
 - [ ] Phase 3: Docling/PDF + 结构化分块 + 非文本挂接  
 文档: `plan/phase-3-docling-structure.md`
