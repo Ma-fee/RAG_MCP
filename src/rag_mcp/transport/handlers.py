@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from rag_mcp.errors import ErrorCode, ServiceException
+from rag_mcp.ingestion.filesystem import load_supported_documents
 from rag_mcp.indexing.manifest import read_active_manifest
 from rag_mcp.indexing.rebuild import rebuild_keyword_index
 from rag_mcp.resources.service import ResourceService
@@ -40,9 +41,28 @@ class ToolHandlers:
         )
 
     def rag_rebuild_index(self, directory_path: str) -> str:
+        source_dir = Path(directory_path)
+        if not source_dir.exists():
+            return build_error_response(
+                code=ErrorCode.NO_ACTIVE_INDEX,
+                message="目录不存在",
+                hint="请检查 directory_path",
+            )
+        if not source_dir.is_dir():
+            return build_error_response(
+                code=ErrorCode.NO_ACTIVE_INDEX,
+                message="目录路径无效",
+                hint="请传入可访问目录",
+            )
+        if not load_supported_documents(source_dir):
+            return build_error_response(
+                code=ErrorCode.NO_ACTIVE_INDEX,
+                message="目录中没有可索引文档",
+                hint="请提供至少一个 .md/.txt/.pdf 文件",
+            )
         try:
             result = rebuild_keyword_index(
-                source_dir=Path(directory_path),
+                source_dir=source_dir,
                 data_dir=self.data_dir,
                 embedding_provider=self.embedding_provider,
             )
@@ -60,10 +80,10 @@ class ToolHandlers:
                 message="目录不存在",
                 hint="请检查 directory_path",
             )
-        except Exception as exc:
+        except Exception:
             return build_error_response(
                 code=ErrorCode.NO_ACTIVE_INDEX,
-                message=f"索引重建失败: {exc}",
+                message="索引重建失败",
                 hint="请检查目录和文件内容",
             )
 
