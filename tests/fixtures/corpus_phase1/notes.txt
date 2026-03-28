@@ -1,0 +1,2 @@
+This fixture is used to verify txt fallback recursive chunking behavior.
+It should not have markdown heading semantics.
