@@ -12,12 +12,12 @@
 
 ## 0) Plan Review（开发前必须完成）
 
-- [ ] 已确认 HTTP 默认为关闭状态，避免默认网络暴露。
-- [ ] 已确认 stdio/HTTP 的 XML 成功与错误结构完全一致。
-- [ ] 已确认路径校验与敏感信息约束（不泄露绝对路径）覆盖到测试。
-- [ ] 已确认发布前回归范围包含 Phase 1-3 全套关键链路。
-- [ ] Reviewer:
-- [ ] Review Date:
+- [x] 已确认 HTTP 默认为关闭状态，避免默认网络暴露。
+- [x] 已确认 stdio/HTTP 的 XML 成功与错误结构完全一致。
+- [x] 已确认路径校验与敏感信息约束（不泄露绝对路径）覆盖到测试。
+- [x] 已确认发布前回归范围包含 Phase 1-3 全套关键链路。
+- [x] Reviewer: Codex
+- [x] Review Date: 2026-03-28
 
 ## 1) 文件规划
 
@@ -40,11 +40,11 @@
 
 ### Task 1: 共享 Handler 抽象
 
-- [ ] Step 1 (Failing Test): 新增 `tests/integration/test_phase4_http_stdio_parity.py` 的基础用例，断言同一输入下 stdio 与 HTTP 返回 XML 完全一致。
-- [ ] Step 2 (Verify Fail): 运行 `pytest tests/integration/test_phase4_http_stdio_parity.py -q`，预期 FAIL。
-- [ ] Step 3 (Minimal Code): 实现 `transport/handlers.py`，将工具逻辑从 `stdio_server.py` 抽离为可复用 handler。
-- [ ] Step 4 (Verify Pass): 运行同一命令，预期 PASS。
-- [ ] Step 5 (Commit): `git add src/rag_mcp/transport/handlers.py src/rag_mcp/transport/stdio_server.py tests/integration/test_phase4_http_stdio_parity.py && git commit -m "refactor: share tool handlers across transports"`
+- [x] Step 1 (Failing Test): 新增 `tests/integration/test_phase4_http_stdio_parity.py` 的基础用例，断言同一输入下 stdio 与 HTTP 返回 XML 完全一致。
+- [x] Step 2 (Verify Fail): 运行 `pytest tests/integration/test_phase4_http_stdio_parity.py -q`，预期 FAIL。
+- [x] Step 3 (Minimal Code): 实现 `transport/handlers.py`，将工具逻辑从 `stdio_server.py` 抽离为可复用 handler。
+- [x] Step 4 (Verify Pass): 运行同一命令，预期 PASS。
+- [x] Step 5 (Commit): `git add src/rag_mcp/transport/handlers.py src/rag_mcp/transport/stdio_server.py tests/integration/test_phase4_http_stdio_parity.py && git commit -m "refactor: share tool handlers across transports"`
 
 ### Task 2: HTTP 入口与显式启用策略
 
@@ -92,4 +92,3 @@
 - [ ] Sign-off Date:
 - [ ] Sign-off Commit:
 - [ ] Notes:
-
