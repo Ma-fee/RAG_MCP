@@ -48,11 +48,11 @@
 
 ### Task 2: HTTP 入口与显式启用策略
 
-- [ ] Step 1 (Failing Test): 扩展 `tests/integration/test_phase4_http_stdio_parity.py`，覆盖 `ENABLE_HTTP=false` 不启动监听，`ENABLE_HTTP=true` 可访问。
-- [ ] Step 2 (Verify Fail): 运行 `pytest tests/integration/test_phase4_http_stdio_parity.py -q`，预期 FAIL。
-- [ ] Step 3 (Minimal Code): 实现 `transport/http_server.py`，更新 `config.py` 与 `main.py` 启动分支。
-- [ ] Step 4 (Verify Pass): 运行同一命令，预期 PASS。
-- [ ] Step 5 (Commit): `git add src/rag_mcp/transport/http_server.py src/rag_mcp/config.py main.py tests/integration/test_phase4_http_stdio_parity.py && git commit -m "feat: add opt-in http transport"`
+- [x] Step 1 (Failing Test): 扩展 `tests/integration/test_phase4_http_stdio_parity.py`，覆盖 `ENABLE_HTTP=false` 不启动监听，`ENABLE_HTTP=true` 可访问。
+- [x] Step 2 (Verify Fail): 运行 `pytest tests/integration/test_phase4_http_stdio_parity.py -q`，预期 FAIL。
+- [x] Step 3 (Minimal Code): 实现 `transport/http_server.py`，更新 `config.py` 与 `main.py` 启动分支。
+- [x] Step 4 (Verify Pass): 运行同一命令，预期 PASS。
+- [x] Step 5 (Commit): `git add src/rag_mcp/transport/http_server.py src/rag_mcp/config.py main.py tests/integration/test_phase4_http_stdio_parity.py && git commit -m "feat: add opt-in http transport"`
 
 ### Task 3: 安全约束与错误细节一致性
 
