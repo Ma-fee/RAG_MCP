@@ -6,6 +6,7 @@ from typing import Any
 from rag_mcp.errors import ErrorCode, ServiceError, ServiceException
 from rag_mcp.indexing.keyword_index import KeywordIndex
 from rag_mcp.indexing.manifest import read_active_manifest
+from rag_mcp.indexing.vector_index import VectorIndex
 
 
 class RetrievalService:
@@ -17,15 +18,7 @@ class RetrievalService:
         if mode == "keyword":
             return self._search_keyword(query=query, top_k=top_k)
         if mode == "vector":
-            manifest = self._load_active_manifest()
-            self._validate_vector_config_or_raise(manifest)
-            raise ServiceException(
-                ServiceError(
-                    code=ErrorCode.SEARCH_MODE_NOT_IMPLEMENTED,
-                    message="检索模式尚未实现: vector",
-                    hint="Phase 2 后续任务会补齐 vector 查询链路",
-                )
-            )
+            return self._search_vector(query=query, top_k=top_k)
         if mode in {"hybrid", "rerank"}:
             raise ServiceException(
                 ServiceError(
@@ -75,6 +68,39 @@ class RetrievalService:
                 )
             )
         return manifest
+
+    def _search_vector(self, query: str, top_k: int) -> dict[str, Any]:
+        manifest = self._load_active_manifest()
+        self._validate_vector_config_or_raise(manifest)
+        if self.embedding_provider is None:
+            raise ServiceException(
+                ServiceError(
+                    code=ErrorCode.SEARCH_MODE_NOT_IMPLEMENTED,
+                    message="vector 检索缺少 embedding provider",
+                    hint="请配置 EmbeddingProvider 后再执行 vector 检索",
+                )
+            )
+
+        vector_index = VectorIndex(index_dir=Path(manifest["index_dir"]))
+        query_embedding = self.embedding_provider.embed_query(query)
+        raw_hits = vector_index.search_by_vector(query_embedding, top_k=top_k)
+        results = [
+            {
+                "text": hit["text"],
+                "title": hit["title"],
+                "uri": hit["uri"],
+                "score": hit["score"],
+                "metadata": hit["metadata"],
+            }
+            for hit in raw_hits
+        ]
+        return {
+            "query": query,
+            "mode": "vector",
+            "top_k": top_k,
+            "result_count": len(results),
+            "results": results,
+        }
 
     def _validate_vector_config_or_raise(self, manifest: dict[str, Any]) -> None:
         if self.embedding_provider is None:
