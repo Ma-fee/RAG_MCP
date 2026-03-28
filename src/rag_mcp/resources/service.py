@@ -40,10 +40,14 @@ class ResourceService:
         )
         for entry in store["entries"]:
             if entry["uri"] == uri:
+                metadata = dict(entry["metadata"])
+                resource_metadata = entry.get("resource_metadata")
+                if isinstance(resource_metadata, dict):
+                    metadata.update(resource_metadata)
                 return {
                     "uri": entry["uri"],
                     "text": entry["text"],
-                    "metadata": entry["metadata"],
+                    "metadata": metadata,
                 }
 
         raise ServiceException(
@@ -53,4 +57,3 @@ class ResourceService:
                 hint="请确认 uri 来源于最新检索结果",
             )
         )
-

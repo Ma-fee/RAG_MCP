@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from rag_mcp.chunking.assembler import ChunkAssembler
 from rag_mcp.models import Chunk, SourceDocument
 
 
@@ -26,6 +27,11 @@ class Chunker:
         self.chunk_overlap = chunk_overlap
 
     def chunk_document(self, document: SourceDocument) -> list[Chunk]:
+        if document.elements:
+            return ChunkAssembler(
+                chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap
+            ).assemble(document)
+
         if document.file_type == "md":
             sections = list(_parse_markdown_sections(document.text, document.title))
         else:
@@ -140,4 +146,3 @@ def _split_text_with_overlap(
             break
         start += step
     return pieces
-

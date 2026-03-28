@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from rag_mcp.ingestion.docling_parser import parse_document_file
 from rag_mcp.models import SourceDocument
 
-SUPPORTED_EXTENSIONS = {".md", ".txt"}
+SUPPORTED_EXTENSIONS = {".md", ".txt", ".pdf"}
 
 
 def load_supported_documents(directory: Path) -> list[SourceDocument]:
@@ -14,16 +15,22 @@ def load_supported_documents(directory: Path) -> list[SourceDocument]:
         if not path.is_file() or path.suffix.lower() not in SUPPORTED_EXTENSIONS:
             continue
 
-        relative_path = path.relative_to(directory).as_posix()
-        file_type = path.suffix.lower().lstrip(".")
-        text = path.read_text(encoding="utf-8")
+        parsed = parse_document_file(path, directory)
+        relative_path = parsed.relative_path
+        file_type = parsed.file_type
+        text = " ".join(
+            element.text for element in parsed.elements if element.element_type != "heading"
+        ).strip()
+        if not text:
+            text = " ".join(element.text for element in parsed.elements).strip()
         docs.append(
             SourceDocument(
                 doc_id=_make_doc_id(relative_path),
-                title=path.name,
+                title=parsed.title,
                 relative_path=relative_path,
                 file_type=file_type,
                 text=text,
+                elements=parsed.elements,
             )
         )
     return docs
@@ -31,4 +38,3 @@ def load_supported_documents(directory: Path) -> list[SourceDocument]:
 
 def _make_doc_id(relative_path: str) -> str:
     return hashlib.sha1(relative_path.encode("utf-8")).hexdigest()[:16]
-

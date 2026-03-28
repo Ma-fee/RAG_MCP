@@ -15,10 +15,15 @@ from rag_mcp.xml_response import build_error_response, build_ok_response
 
 
 class StdioServer:
-    def __init__(self, data_dir: Path | None = None) -> None:
+    def __init__(
+        self, data_dir: Path | None = None, embedding_provider: Any | None = None
+    ) -> None:
         cfg = AppConfig.from_env()
         self.data_dir = Path(data_dir) if data_dir is not None else cfg.data_dir
-        self.retrieval = RetrievalService(self.data_dir)
+        self.embedding_provider = embedding_provider
+        self.retrieval = RetrievalService(
+            self.data_dir, embedding_provider=self.embedding_provider
+        )
         self.resources = ResourceService(self.data_dir)
 
     def rag_rebuild_index(self, directory_path: str) -> str:
@@ -26,6 +31,7 @@ class StdioServer:
             result = rebuild_keyword_index(
                 source_dir=Path(directory_path),
                 data_dir=self.data_dir,
+                embedding_provider=self.embedding_provider,
             )
             payload = {
                 "corpus_id": result["corpus_id"],
@@ -132,4 +138,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+
+from rag_mcp.ingestion.document_model import Chunk, Document, Element
 
 
 @dataclass(frozen=True)
@@ -11,19 +12,4 @@ class SourceDocument:
     relative_path: str
     file_type: str
     text: str
-
-
-@dataclass(frozen=True)
-class Chunk:
-    chunk_id: str
-    doc_id: str
-    text: str
-    chunk_index: int
-    title: str
-    file_type: str
-    relative_path: str
-    heading_path: str
-    section_title: str
-    section_level: int
-    metadata: dict[str, Any] = field(default_factory=dict)
-
+    elements: list[Element] = field(default_factory=list)
