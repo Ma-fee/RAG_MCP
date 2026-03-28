@@ -12,7 +12,7 @@ from rag_mcp.indexing.keyword_index import persist_keyword_store
 from rag_mcp.indexing.manifest import read_active_manifest, write_active_manifest_atomic
 from rag_mcp.indexing.vector_index import VectorIndex
 from rag_mcp.ingestion.filesystem import load_supported_documents
-from rag_mcp.models import Chunk
+from rag_mcp.models import Chunk, SourceDocument
 
 
 def rebuild_keyword_index(
@@ -75,21 +75,24 @@ def _build_and_persist_keyword_store(
     chunk_overlap: int,
     embedding_provider: Any | None,
 ) -> dict[str, int]:
-    documents = load_supported_documents(source_dir)
+    documents = sorted(
+        load_supported_documents(source_dir), key=lambda item: item.relative_path
+    )
     chunker = Chunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
 
     entries: list[dict[str, Any]] = []
     for doc in documents:
+        stable_doc_id = _stable_doc_id(doc.relative_path)
         chunks: list[Chunk] = chunker.chunk_document(doc)
         attachment_meta_by_chunk = _build_attachment_metadata(doc, chunks)
         for chunk in chunks:
             entry: dict[str, Any] = {
                 "text": chunk.text,
                 "title": chunk.title,
-                "uri": f"rag://corpus/{corpus_id}/{chunk.doc_id}#chunk-{chunk.chunk_index}",
+                "uri": f"rag://corpus/{corpus_id}/{stable_doc_id}#chunk-{chunk.chunk_index}",
                 "metadata": {
                     "corpus_id": corpus_id,
-                    "doc_id": chunk.doc_id,
+                    "doc_id": stable_doc_id,
                     "chunk_index": chunk.chunk_index,
                     "file_type": chunk.file_type,
                     "title": chunk.title,
@@ -150,7 +153,7 @@ def _entry_id(entry: dict[str, Any]) -> str:
 
 
 def _build_attachment_metadata(
-    document: Any, chunks: list[Chunk]
+    document: SourceDocument, chunks: list[Chunk]
 ) -> dict[int, dict[str, list[str]]]:
     if not document.elements or not chunks:
         return {}
@@ -191,3 +194,8 @@ def _build_attachment_metadata(
         if payload:
             compact[chunk_index] = payload
     return compact
+
+
+def _stable_doc_id(relative_path: str) -> str:
+    normalized = str(relative_path).replace("\\", "/").lower()
+    return hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:16]
