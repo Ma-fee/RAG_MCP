@@ -9,18 +9,29 @@ from rag_mcp.indexing.manifest import read_active_manifest
 
 
 class RetrievalService:
-    def __init__(self, data_dir: Path) -> None:
+    def __init__(self, data_dir: Path, embedding_provider: Any | None = None) -> None:
         self.data_dir = Path(data_dir)
+        self.embedding_provider = embedding_provider
 
     def search(self, query: str, mode: str, top_k: int = 5) -> dict[str, Any]:
         if mode == "keyword":
             return self._search_keyword(query=query, top_k=top_k)
-        if mode in {"vector", "hybrid", "rerank"}:
+        if mode == "vector":
+            manifest = self._load_active_manifest()
+            self._validate_vector_config_or_raise(manifest)
+            raise ServiceException(
+                ServiceError(
+                    code=ErrorCode.SEARCH_MODE_NOT_IMPLEMENTED,
+                    message="检索模式尚未实现: vector",
+                    hint="Phase 2 后续任务会补齐 vector 查询链路",
+                )
+            )
+        if mode in {"hybrid", "rerank"}:
             raise ServiceException(
                 ServiceError(
                     code=ErrorCode.SEARCH_MODE_NOT_IMPLEMENTED,
                     message=f"检索模式尚未实现: {mode}",
-                    hint="Phase 1 仅支持 keyword 检索",
+                    hint="当前版本仅支持 keyword/vector",
                 )
             )
         raise ServiceException(
@@ -65,3 +76,34 @@ class RetrievalService:
             )
         return manifest
 
+    def _validate_vector_config_or_raise(self, manifest: dict[str, Any]) -> None:
+        if self.embedding_provider is None:
+            return
+        expected_model = manifest.get("embedding_model")
+        expected_dimension = manifest.get("embedding_dimension")
+        actual_model = self.embedding_provider.model_name()
+        actual_dimension = self.embedding_provider.embedding_dimension()
+
+        if (
+            expected_model is not None
+            and expected_dimension is not None
+            and (
+                str(expected_model) != str(actual_model)
+                or int(expected_dimension) != int(actual_dimension)
+            )
+        ):
+            raise ServiceException(
+                ServiceError(
+                    code=ErrorCode.VECTOR_INDEX_CONFIG_MISMATCH,
+                    message=(
+                        "活动索引 embedding 配置与当前运行配置不一致"
+                    ),
+                    hint="请重新执行 rag_rebuild_index 以重建向量索引",
+                    details={
+                        "index_embedding_model": str(expected_model),
+                        "runtime_embedding_model": str(actual_model),
+                        "index_embedding_dimension": str(expected_dimension),
+                        "runtime_embedding_dimension": str(actual_dimension),
+                    },
+                )
+            )

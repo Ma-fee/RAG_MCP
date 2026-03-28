@@ -50,6 +50,8 @@ def rebuild_keyword_index(
             "indexed_at": int(time.time()),
             "document_count": result["document_count"],
             "chunk_count": result["chunk_count"],
+            "embedding_model": result["embedding_model"],
+            "embedding_dimension": result["embedding_dimension"],
         }
         write_active_manifest_atomic(active_manifest_path, manifest)
     except Exception:
@@ -120,7 +122,18 @@ def _build_and_persist_keyword_store(
         )
         vector_index.upsert_chunks(vector_entries, embeddings)
 
-    return {"document_count": len(documents), "chunk_count": len(entries)}
+    return {
+        "document_count": len(documents),
+        "chunk_count": len(entries),
+        "embedding_model": (
+            embedding_provider.model_name() if embedding_provider is not None else None
+        ),
+        "embedding_dimension": (
+            embedding_provider.embedding_dimension()
+            if embedding_provider is not None
+            else None
+        ),
+    }
 
 
 def _make_corpus_id(source_dir: Path) -> str:

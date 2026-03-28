@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from rag_mcp.errors import ErrorCode, ServiceException
 from rag_mcp.indexing.manifest import read_active_manifest
 from rag_mcp.indexing.rebuild import rebuild_keyword_index
 from rag_mcp.indexing.vector_index import VectorIndex
+from rag_mcp.retrieval.service import RetrievalService
 
 
 class _FakeEmbeddingProvider:
@@ -115,3 +119,49 @@ def test_rebuild_pipeline_overwrites_old_vector_index(tmp_path: Path) -> None:
 
     assert Path(second["index_dir"]).exists()
     assert not first_index_dir.exists()
+
+
+def test_manifest_records_embedding_model_and_dimension(tmp_path: Path) -> None:
+    corpus_dir = tmp_path / "corpus"
+    data_dir = tmp_path / "data"
+    _write_corpus(corpus_dir)
+    provider = _FakeEmbeddingProvider(model="fake-v2", dimension=6)
+
+    rebuild_keyword_index(
+        source_dir=corpus_dir,
+        data_dir=data_dir,
+        chunk_size=64,
+        chunk_overlap=8,
+        embedding_provider=provider,
+    )
+
+    manifest = read_active_manifest(data_dir / "active_index.json")
+    assert manifest is not None
+    assert manifest["embedding_model"] == "fake-v2"
+    assert manifest["embedding_dimension"] == 6
+
+
+def test_vector_mode_reports_config_mismatch_but_keyword_still_works(
+    tmp_path: Path,
+) -> None:
+    corpus_dir = tmp_path / "corpus"
+    data_dir = tmp_path / "data"
+    _write_corpus(corpus_dir)
+    index_provider = _FakeEmbeddingProvider(model="fake-v1", dimension=3)
+    query_provider = _FakeEmbeddingProvider(model="fake-v2", dimension=6)
+
+    rebuild_keyword_index(
+        source_dir=corpus_dir,
+        data_dir=data_dir,
+        chunk_size=64,
+        chunk_overlap=8,
+        embedding_provider=index_provider,
+    )
+
+    retrieval = RetrievalService(data_dir=data_dir, embedding_provider=query_provider)
+    keyword_payload = retrieval.search(query="alpha", mode="keyword", top_k=2)
+    assert keyword_payload["result_count"] >= 1
+
+    with pytest.raises(ServiceException) as exc:
+        retrieval.search(query="alpha", mode="vector", top_k=2)
+    assert exc.value.error.code == ErrorCode.VECTOR_INDEX_CONFIG_MISMATCH
