@@ -10,12 +10,17 @@ from typing import Any
 from rag_mcp.chunking.chunker import Chunker
 from rag_mcp.indexing.keyword_index import persist_keyword_store
 from rag_mcp.indexing.manifest import read_active_manifest, write_active_manifest_atomic
+from rag_mcp.indexing.vector_index import VectorIndex
 from rag_mcp.ingestion.filesystem import load_supported_documents
 from rag_mcp.models import Chunk
 
 
 def rebuild_keyword_index(
-    source_dir: Path, data_dir: Path, chunk_size: int = 800, chunk_overlap: int = 120
+    source_dir: Path,
+    data_dir: Path,
+    chunk_size: int = 800,
+    chunk_overlap: int = 120,
+    embedding_provider: Any | None = None,
 ) -> dict[str, Any]:
     source_dir = source_dir.resolve()
     data_dir = data_dir.resolve()
@@ -35,6 +40,7 @@ def rebuild_keyword_index(
             index_dir=temp_index_dir,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            embedding_provider=embedding_provider,
         )
         temp_index_dir.replace(final_index_dir)
 
@@ -65,6 +71,7 @@ def _build_and_persist_keyword_store(
     index_dir: Path,
     chunk_size: int,
     chunk_overlap: int,
+    embedding_provider: Any | None,
 ) -> dict[str, int]:
     documents = load_supported_documents(source_dir)
     chunker = Chunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
@@ -94,6 +101,25 @@ def _build_and_persist_keyword_store(
             )
 
     persist_keyword_store(index_dir=index_dir, corpus_id=corpus_id, entries=entries)
+
+    if embedding_provider is not None and entries:
+        vector_index = VectorIndex(index_dir=index_dir)
+        vector_index.reset()
+        vector_entries = [
+            {
+                "id": _entry_id(entry),
+                "text": entry["text"],
+                "uri": entry["uri"],
+                "title": entry["title"],
+                "metadata": entry["metadata"],
+            }
+            for entry in entries
+        ]
+        embeddings = embedding_provider.embed_documents(
+            [item["text"] for item in vector_entries]
+        )
+        vector_index.upsert_chunks(vector_entries, embeddings)
+
     return {"document_count": len(documents), "chunk_count": len(entries)}
 
 
@@ -101,3 +127,7 @@ def _make_corpus_id(source_dir: Path) -> str:
     normalized = str(source_dir).replace("\\", "/").lower()
     return hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:16]
 
+
+def _entry_id(entry: dict[str, Any]) -> str:
+    meta = entry["metadata"]
+    return f"{meta['doc_id']}#chunk-{meta['chunk_index']}"
