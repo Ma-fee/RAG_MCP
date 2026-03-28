@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from urllib import request
 import xml.etree.ElementTree as ET
 
+from rag_mcp.transport.http_server import start_http_server_if_enabled
 from rag_mcp.transport.handlers import ToolHandlers
 from rag_mcp.transport.stdio_server import StdioServer
 
@@ -48,3 +51,33 @@ def test_shared_handlers_keep_http_and_stdio_xml_identical(tmp_path: Path) -> No
     stdio_read = stdio.rag_read_resource(uri)
     http_read = handlers.handle_tool("rag_read_resource", {"uri": uri})
     assert stdio_read == http_read
+
+
+def test_http_transport_only_starts_when_enabled(tmp_path: Path) -> None:
+    corpus_dir = tmp_path / "corpus"
+    data_dir = tmp_path / "data"
+    _write_corpus(corpus_dir)
+
+    disabled_server = start_http_server_if_enabled(
+        enable_http=False, data_dir=data_dir, host="127.0.0.1", port=0
+    )
+    assert disabled_server is None
+
+    enabled_server = start_http_server_if_enabled(
+        enable_http=True, data_dir=data_dir, host="127.0.0.1", port=0
+    )
+    assert enabled_server is not None
+    try:
+        payload = {"tool": "rag_rebuild_index", "args": {"directory_path": str(corpus_dir)}}
+        req = request.Request(
+            url=enabled_server.endpoint_url(),
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with request.urlopen(req, timeout=5) as resp:
+            xml_text = resp.read().decode("utf-8")
+        root = ET.fromstring(xml_text)
+        assert root.findtext("status") == "ok"
+    finally:
+        enabled_server.close()
