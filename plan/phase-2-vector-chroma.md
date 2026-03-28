@@ -75,23 +75,23 @@
 
 ### Task 5: 回归与文档更新
 
-- [ ] Step 1 (Failing Test): 将 Phase 1 集成测试与 Phase 2 集成测试合并运行，记录潜在回归失败。
-- [ ] Step 2 (Verify Fail): 运行 `pytest tests/integration/test_phase1_stdio_keyword_flow.py tests/integration/test_phase2_vector_keyword_parity.py -q`，若失败先定位并补测试。
-- [ ] Step 3 (Minimal Code): 修复回归并更新 `README.md` 的环境变量与本地运行说明。
-- [ ] Step 4 (Verify Pass): 运行 `pytest tests/unit tests/integration/test_phase1_stdio_keyword_flow.py tests/integration/test_phase2_vector_keyword_parity.py -q`，预期 PASS。
-- [ ] Step 5 (Commit): `git add README.md tests src/rag_mcp && git commit -m "chore: phase2 regression pass and docs update"`
+- [x] Step 1 (Failing Test): 将 Phase 1 集成测试与 Phase 2 集成测试合并运行，记录潜在回归失败。
+- [x] Step 2 (Verify Fail): 运行 `pytest tests/integration/test_phase1_stdio_keyword_flow.py tests/integration/test_phase2_vector_keyword_parity.py -q`，若失败先定位并补测试。
+- [x] Step 3 (Minimal Code): 修复回归并更新 `README.md` 的环境变量与本地运行说明。
+- [x] Step 4 (Verify Pass): 运行 `pytest tests/unit tests/integration/test_phase1_stdio_keyword_flow.py tests/integration/test_phase2_vector_keyword_parity.py -q`，预期 PASS。
+- [x] Step 5 (Commit): `git add README.md tests src/rag_mcp && git commit -m "chore: phase2 regression pass and docs update"`
 
 ## 3) Phase 2 验收（可运行 + 可签收）
 
-- [ ] `keyword` 与 `vector` 模式均可返回结果，并共享同一 `rag://` 资源寻址规则。
-- [ ] `mode=hybrid`、`mode=rerank` 返回 `SEARCH_MODE_NOT_IMPLEMENTED`。
-- [ ] embedding 配置与活动索引不一致时，仅 `vector` 返回 `VECTOR_INDEX_CONFIG_MISMATCH`。
-- [ ] `pytest tests/unit tests/integration/test_phase1_stdio_keyword_flow.py tests/integration/test_phase2_vector_keyword_parity.py -q` 全通过。
+- [x] `keyword` 与 `vector` 模式均可返回结果，并共享同一 `rag://` 资源寻址规则。
+- [x] `mode=hybrid`、`mode=rerank` 返回 `SEARCH_MODE_NOT_IMPLEMENTED`。
+- [x] embedding 配置与活动索引不一致时，仅 `vector` 返回 `VECTOR_INDEX_CONFIG_MISMATCH`。
+- [x] `pytest tests/unit tests/integration/test_phase1_stdio_keyword_flow.py tests/integration/test_phase2_vector_keyword_parity.py -q` 全通过。
 
 ## 4) 签收记录
 
-- [ ] Phase Owner:
-- [ ] QA/Reviewer:
-- [ ] Sign-off Date:
-- [ ] Sign-off Commit:
-- [ ] Notes:
+- [x] Phase Owner: Codex
+- [x] QA/Reviewer: Pending user sign-off
+- [x] Sign-off Date: 2026-03-28
+- [x] Sign-off Commit: 8983540
+- [x] Notes: Phase 2 implementation and verification completed in isolated worktree branch.
