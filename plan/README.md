@@ -16,9 +16,9 @@
 文档: `plan/phase-1-keyword-stdio-mvp.md`
 - [x] Phase 2: Vector + Chroma + Embedding 配置一致性  
 文档: `plan/phase-2-vector-chroma.md`
-- [ ] Phase 3: Docling/PDF + 结构化分块 + 非文本挂接  
+- [x] Phase 3: Docling/PDF + 结构化分块 + 非文本挂接  
 文档: `plan/phase-3-docling-structure.md`
-- [ ] Phase 4: HTTP 传输对等 + 安全约束 + 发布验收  
+- [x] Phase 4: HTTP 传输对等 + 安全约束 + 发布验收  
 文档: `plan/phase-4-http-parity-release.md`
 
 ## 里程碑签收标准
