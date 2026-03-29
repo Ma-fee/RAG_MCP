@@ -33,10 +33,27 @@ class ResourceService:
                 )
             )
 
-        store = json.loads(
-            (Path(manifest["index_dir"]) / "keyword_store.json").read_text(
-                encoding="utf-8"
+        index_dir = Path(manifest["index_dir"])
+
+        # Route image/table URIs to resource_store.json
+        if parsed.fragment_type in ("image", "table"):
+            resource_store_path = index_dir / "resource_store.json"
+            if resource_store_path.exists():
+                store = json.loads(resource_store_path.read_text(encoding="utf-8"))
+                for entry in store["entries"]:
+                    if entry["uri"] == uri:
+                        return dict(entry)
+            raise ServiceException(
+                ServiceError(
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
+                    message="未找到对应资源",
+                    hint="请确认 uri 来源于最新检索结果",
+                )
             )
+
+        # text/chunk URIs: look up keyword_store.json
+        store = json.loads(
+            (index_dir / "keyword_store.json").read_text(encoding="utf-8")
         )
         for entry in store["entries"]:
             if entry["uri"] == uri:

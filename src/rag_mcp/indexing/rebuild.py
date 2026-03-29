@@ -8,8 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from rag_mcp.chunking.chunker import Chunker
+from rag_mcp.indexing.cross_reference import build_cross_references
 from rag_mcp.indexing.keyword_index import persist_keyword_store
 from rag_mcp.indexing.manifest import read_active_manifest, write_active_manifest_atomic
+from rag_mcp.indexing.resource_store import ResourceStore
 from rag_mcp.indexing.vector_index import VectorIndex
 from rag_mcp.ingestion.filesystem import load_supported_documents
 from rag_mcp.models import Chunk, SourceDocument
@@ -21,6 +23,7 @@ def rebuild_keyword_index(
     chunk_size: int = 800,
     chunk_overlap: int = 120,
     embedding_provider: Any | None = None,
+    vlm_client: Any | None = None,
 ) -> dict[str, Any]:
     source_dir = source_dir.resolve()
     data_dir = data_dir.resolve()
@@ -41,6 +44,7 @@ def rebuild_keyword_index(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             embedding_provider=embedding_provider,
+            vlm_client=vlm_client,
         )
         temp_index_dir.replace(final_index_dir)
 
@@ -74,11 +78,20 @@ def _build_and_persist_keyword_store(
     chunk_size: int,
     chunk_overlap: int,
     embedding_provider: Any | None,
+    vlm_client: Any | None = None,
 ) -> dict[str, int]:
     documents = sorted(
         load_supported_documents(source_dir), key=lambda item: item.relative_path
     )
     chunker = Chunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+
+    # Build ResourceStore (image/table/text resource entries) for all documents
+    resource_store = ResourceStore(index_dir=index_dir, corpus_id=corpus_id, vlm_client=vlm_client)
+    all_resource_entries: list[dict[str, Any]] = []
+    for doc in documents:
+        all_resource_entries.extend(resource_store.build(doc))
+    linked_entries = build_cross_references(all_resource_entries)
+    resource_store._persist(linked_entries)
 
     entries: list[dict[str, Any]] = []
     for doc in documents:
@@ -89,7 +102,7 @@ def _build_and_persist_keyword_store(
             entry: dict[str, Any] = {
                 "text": chunk.text,
                 "title": chunk.title,
-                "uri": f"rag://corpus/{corpus_id}/{stable_doc_id}#chunk-{chunk.chunk_index}",
+                "uri": f"rag://corpus/{corpus_id}/{stable_doc_id}#text-{chunk.chunk_index}",
                 "metadata": {
                     "corpus_id": corpus_id,
                     "doc_id": stable_doc_id,
@@ -149,7 +162,7 @@ def _make_corpus_id(source_dir: Path) -> str:
 
 def _entry_id(entry: dict[str, Any]) -> str:
     meta = entry["metadata"]
-    return f"{meta['doc_id']}#chunk-{meta['chunk_index']}"
+    return f"{meta['doc_id']}#text-{meta['chunk_index']}"
 
 
 def _build_attachment_metadata(
