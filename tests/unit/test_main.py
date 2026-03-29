@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from rag_mcp.config import AppConfig
 
@@ -12,10 +13,9 @@ app_main = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(app_main)
 
 
-def _make_cfg(enable_http: bool, embedding_api_key: str) -> AppConfig:
+def _make_cfg(mcp_transport: str = "stdio", embedding_api_key: str = "") -> AppConfig:
     return AppConfig(
         data_dir=Path(".rag_mcp_data"),
-        enable_http=enable_http,
         http_host="127.0.0.1",
         http_port=8787,
         embedding_api_key=embedding_api_key,
@@ -30,16 +30,17 @@ def _make_cfg(enable_http: bool, embedding_api_key: str) -> AppConfig:
         multimodal_api_key="",
         multimodal_base_url="https://api.siliconflow.cn/v1",
         multimodal_model="zai-org/GLM-4.6V",
+        mcp_transport=mcp_transport,
     )
 
 
 def test_build_embedding_provider_returns_none_without_api_key() -> None:
-    cfg = _make_cfg(enable_http=False, embedding_api_key="")
+    cfg = _make_cfg(embedding_api_key="")
     assert app_main._build_embedding_provider(cfg) is None
 
 
 def test_build_embedding_provider_uses_embedding_client(monkeypatch) -> None:
-    cfg = _make_cfg(enable_http=False, embedding_api_key="sk-test")
+    cfg = _make_cfg(embedding_api_key="sk-test")
     sentinel = object()
 
     monkeypatch.setattr(
@@ -51,52 +52,39 @@ def test_build_embedding_provider_uses_embedding_client(monkeypatch) -> None:
     assert app_main._build_embedding_provider(cfg) is sentinel
 
 
-def test_main_runs_stdio_loop_when_http_disabled(monkeypatch) -> None:
-    cfg = _make_cfg(enable_http=False, embedding_api_key="sk-test")
-    sentinel_provider = object()
-    captured: dict[str, object] = {}
+def test_main_stdio_calls_mcp_run(monkeypatch) -> None:
+    cfg = _make_cfg(mcp_transport="stdio")
+    fake_mcp = MagicMock()
+    captured: dict = {}
 
     monkeypatch.setattr(app_main.AppConfig, "from_env", lambda: cfg)
-    monkeypatch.setattr(app_main, "_build_embedding_provider", lambda _cfg: sentinel_provider)
-
-    class _FakeStdioServer:
-        def __init__(self, data_dir: Path, embedding_provider: object) -> None:
-            captured["data_dir"] = data_dir
-            captured["embedding_provider"] = embedding_provider
-
-    monkeypatch.setattr(app_main, "StdioServer", _FakeStdioServer)
-    monkeypatch.setattr(app_main, "run_stdio_loop", lambda server: captured.setdefault("server", server))
+    monkeypatch.setattr(app_main, "_build_embedding_provider", lambda _cfg: None)
+    monkeypatch.setattr(app_main, "create_mcp_server", lambda handlers: fake_mcp)
+    fake_mcp.run.side_effect = lambda transport: captured.update({"transport": transport})
 
     app_main.main()
 
-    assert captured["data_dir"] == cfg.data_dir
-    assert captured["embedding_provider"] is sentinel_provider
-    assert captured["server"].__class__.__name__ == "_FakeStdioServer"
+    fake_mcp.run.assert_called_once_with(transport="stdio")
 
 
-def test_main_runs_http_server_when_enabled(monkeypatch) -> None:
-    cfg = _make_cfg(enable_http=True, embedding_api_key="sk-test")
-    sentinel_provider = object()
-    captured: dict[str, object] = {}
+def test_main_sse_calls_uvicorn(monkeypatch) -> None:
+    cfg = _make_cfg(mcp_transport="sse")
+    fake_mcp = MagicMock()
+    fake_app = MagicMock()
+    captured: dict = {}
 
     monkeypatch.setattr(app_main.AppConfig, "from_env", lambda: cfg)
-    monkeypatch.setattr(app_main, "_build_embedding_provider", lambda _cfg: sentinel_provider)
+    monkeypatch.setattr(app_main, "_build_embedding_provider", lambda _cfg: None)
+    monkeypatch.setattr(app_main, "create_mcp_server", lambda handlers: fake_mcp)
+    monkeypatch.setattr(app_main, "create_app", lambda resource_service, data_dir: fake_app)
     monkeypatch.setattr(
-        app_main,
-        "run_http_server",
-        lambda data_dir, host, port, embedding_provider: captured.update(
-            {
-                "data_dir": data_dir,
-                "host": host,
-                "port": port,
-                "embedding_provider": embedding_provider,
-            }
-        ),
+        app_main.uvicorn,
+        "run",
+        lambda app, host, port: captured.update({"app": app, "host": host, "port": port}),
     )
 
     app_main.main()
 
-    assert captured["data_dir"] == cfg.data_dir
     assert captured["host"] == cfg.http_host
     assert captured["port"] == cfg.http_port
-    assert captured["embedding_provider"] is sentinel_provider
+    fake_app.mount.assert_called_once()

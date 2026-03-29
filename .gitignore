@@ -17,3 +17,13 @@ wheels/
 # Git worktrees
 .worktrees/
 worktrees/
+
+# Runtime data
+.rag_mcp_data/
+dataset/
+record.txt
+
+# Local tool configs
+.claude/
+.roo/
+.vscode/

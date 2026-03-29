@@ -1,14 +1,51 @@
+from __future__ import annotations
+
+import logging
+import sys
+from typing import Any
+
+import uvicorn
+from dotenv import load_dotenv
+
+# 在导入 config 之前加载 .env 文件
+load_dotenv()
+
 from rag_mcp.config import AppConfig
-from rag_mcp.transport.http_server import run_http_server
-from rag_mcp.transport.stdio_server import main as run_stdio_server
+from rag_mcp.embedding.client import EmbeddingClient
+from rag_mcp.transport.fastapi_app import create_app
+from rag_mcp.transport.handlers import ToolHandlers
+from rag_mcp.transport.mcp_server import create_mcp_server
+
+# 配置根 logger
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger(__name__)
+
+
+def _build_embedding_provider(cfg: AppConfig) -> Any | None:
+    if not cfg.embedding_api_key.strip():
+        return None
+    return EmbeddingClient.from_config(cfg)
 
 
 def main() -> None:
+    logger.info("Starting RAG MCP server...")
     cfg = AppConfig.from_env()
-    if cfg.enable_http:
-        run_http_server(data_dir=cfg.data_dir, host=cfg.http_host, port=cfg.http_port)
-        return
-    run_stdio_server()
+    embedding_provider = _build_embedding_provider(cfg)
+    handlers = ToolHandlers(cfg.data_dir, embedding_provider)
+    mcp = create_mcp_server(handlers)
+
+    if cfg.mcp_transport == "sse":
+        logger.info(f"Starting SSE server on {cfg.http_host}:{cfg.http_port}")
+        fastapi_app = create_app(handlers.resources, cfg.data_dir)
+        fastapi_app.mount("/mcp", mcp.sse_app())
+        uvicorn.run(fastapi_app, host=cfg.http_host, port=cfg.http_port)
+    else:
+        logger.info("Starting stdio server")
+        mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":

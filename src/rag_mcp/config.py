@@ -8,7 +8,6 @@ from pathlib import Path
 @dataclass(frozen=True)
 class AppConfig:
     data_dir: Path
-    enable_http: bool
     http_host: str
     http_port: int
     embedding_api_key: str
@@ -23,12 +22,12 @@ class AppConfig:
     multimodal_api_key: str
     multimodal_base_url: str
     multimodal_model: str
+    mcp_transport: str
 
     @classmethod
     def from_env(cls) -> "AppConfig":
         return cls(
             data_dir=Path(os.getenv("RAG_MCP_DATA_DIR", ".rag_mcp_data")),
-            enable_http=_to_bool(os.getenv("ENABLE_HTTP", "false")),
             http_host=os.getenv("HTTP_HOST", "127.0.0.1"),
             http_port=int(os.getenv("HTTP_PORT", "8787")),
             embedding_api_key=os.getenv("EMBEDDING_API_KEY", ""),
@@ -49,6 +48,7 @@ class AppConfig:
             multimodal_api_key=os.getenv("MULTIMODAL_API_KEY", ""),
             multimodal_base_url=os.getenv("MULTIMODAL_BASE_URL", "https://api.siliconflow.cn/v1"),
             multimodal_model=os.getenv("MULTIMODAL_MODEL", "zai-org/GLM-4.6V"),
+            mcp_transport=os.getenv("MCP_TRANSPORT", "stdio"),
         )
 
 
@@ -56,7 +56,3 @@ def _to_optional_int(value: str | None) -> int | None:
     if value is None or value.strip() == "":
         return None
     return int(value)
-
-
-def _to_bool(value: str) -> bool:
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
