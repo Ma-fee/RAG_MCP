@@ -67,24 +67,14 @@ def test_main_stdio_calls_mcp_run(monkeypatch) -> None:
     fake_mcp.run.assert_called_once_with(transport="stdio")
 
 
-def test_main_sse_calls_uvicorn(monkeypatch) -> None:
+def test_main_sse_calls_mcp_run(monkeypatch) -> None:
     cfg = _make_cfg(mcp_transport="sse")
     fake_mcp = MagicMock()
-    fake_app = MagicMock()
-    captured: dict = {}
 
     monkeypatch.setattr(app_main.AppConfig, "from_env", lambda: cfg)
     monkeypatch.setattr(app_main, "_build_embedding_provider", lambda _cfg: None)
     monkeypatch.setattr(app_main, "create_mcp_server", lambda handlers: fake_mcp)
-    monkeypatch.setattr(app_main, "create_app", lambda resource_service, data_dir: fake_app)
-    monkeypatch.setattr(
-        app_main.uvicorn,
-        "run",
-        lambda app, host, port: captured.update({"app": app, "host": host, "port": port}),
-    )
 
     app_main.main()
 
-    assert captured["host"] == cfg.http_host
-    assert captured["port"] == cfg.http_port
-    fake_app.mount.assert_called_once()
+    fake_mcp.run.assert_called_once_with(transport="sse", host=cfg.http_host, port=cfg.http_port)

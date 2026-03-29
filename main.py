@@ -4,7 +4,6 @@ import logging
 import sys
 from typing import Any
 
-import uvicorn
 from dotenv import load_dotenv
 
 # 在导入 config 之前加载 .env 文件
@@ -12,7 +11,6 @@ load_dotenv()
 
 from rag_mcp.config import AppConfig
 from rag_mcp.embedding.client import EmbeddingClient
-from rag_mcp.transport.fastapi_app import create_app
 from rag_mcp.transport.handlers import ToolHandlers
 from rag_mcp.transport.mcp_server import create_mcp_server
 
@@ -40,9 +38,18 @@ def main() -> None:
 
     if cfg.mcp_transport == "sse":
         logger.info(f"Starting SSE server on {cfg.http_host}:{cfg.http_port}")
-        fastapi_app = create_app(handlers.resources, cfg.data_dir)
-        fastapi_app.mount("/mcp", mcp.sse_app())
-        uvicorn.run(fastapi_app, host=cfg.http_host, port=cfg.http_port)
+        mcp.run(
+            transport="sse",
+            host=cfg.http_host,
+            port=cfg.http_port,
+        )
+    elif cfg.mcp_transport == "streamable-http" or cfg.mcp_transport == "streamable_http":
+        logger.info(f"Starting Streamable-HTTP server on {cfg.http_host}:{cfg.http_port}")
+        mcp.run(
+            transport="streamable-http",
+            host=cfg.http_host,
+            port=cfg.http_port,
+        )
     else:
         logger.info("Starting stdio server")
         mcp.run(transport="stdio")

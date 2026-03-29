@@ -20,6 +20,7 @@ worktrees/
 
 # Runtime data
 .rag_mcp_data/
+.docling_models/
 dataset/
 record.txt
 

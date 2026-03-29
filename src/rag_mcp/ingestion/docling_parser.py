@@ -4,9 +4,15 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-from docling.document_converter import DocumentConverter
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.utils.model_downloader import download_models
 
 from rag_mcp.ingestion.document_model import Document, Element
+
+# 模型存放在项目根目录下，避免散落到 ~/.cache
+_MODELS_DIR = Path(__file__).resolve().parents[3] / ".docling_models"
 
 _SKIP_LABELS = {"page_header", "page_footer", "footnote"}
 _HEADING_LABELS = {"title", "section_header"}
@@ -45,13 +51,25 @@ def parse_document_file(
     )
 
 
+def _ensure_models() -> Path:
+    models_dir = _MODELS_DIR
+    layout_model = models_dir / "layout" / "model.safetensors"
+    if not layout_model.exists():
+        download_models(output_dir=models_dir, progress=True)
+    return models_dir
+
+
 def _parse_pdf_elements(
     path: Path,
     title: str,
     doc_id: str,
     assets_dir: Path,
 ) -> list[Element]:
-    converter = DocumentConverter()
+    models_dir = _ensure_models()
+    pipeline_opts = PdfPipelineOptions(artifacts_path=models_dir)
+    converter = DocumentConverter(
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_opts)}
+    )
     result = converter.convert(str(path))
     dl_doc = result.document
 
