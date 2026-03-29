@@ -20,6 +20,9 @@ class AppConfig:
     keyword_top_k: int
     chunk_size: int
     chunk_overlap: int
+    multimodal_api_key: str
+    multimodal_base_url: str
+    multimodal_model: str
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -43,6 +46,9 @@ class AppConfig:
             keyword_top_k=int(os.getenv("KEYWORD_TOP_K", "8")),
             chunk_size=int(os.getenv("CHUNK_SIZE", "800")),
             chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "120")),
+            multimodal_api_key=os.getenv("MULTIMODAL_API_KEY", ""),
+            multimodal_base_url=os.getenv("MULTIMODAL_BASE_URL", "https://api.siliconflow.cn/v1"),
+            multimodal_model=os.getenv("MULTIMODAL_MODEL", "zai-org/GLM-4.6V"),
         )
 
 
