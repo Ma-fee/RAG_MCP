@@ -53,6 +53,7 @@ def _make_picture_item(caption: str = "", page_no: int = 1):
 def _make_converter_result(items):
     """Build a mock DocumentConverter result with given items."""
     mock_doc = MagicMock()
+    mock_doc.model_dump_json.return_value = "{}"
     mock_doc.iterate_items.return_value = [(item, None) for item in items]
     mock_result = MagicMock()
     mock_result.document = mock_doc

@@ -23,6 +23,11 @@ class AppConfig:
     multimodal_base_url: str
     multimodal_model: str
     mcp_transport: str
+    rerank_api_key: str
+    rerank_base_url: str
+    rerank_model: str
+    rerank_timeout_seconds: int
+    rerank_top_k_candidates: int
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -49,6 +54,11 @@ class AppConfig:
             multimodal_base_url=os.getenv("MULTIMODAL_BASE_URL", "https://api.siliconflow.cn/v1"),
             multimodal_model=os.getenv("MULTIMODAL_MODEL", "zai-org/GLM-4.6V"),
             mcp_transport=os.getenv("MCP_TRANSPORT", "stdio"),
+            rerank_api_key=os.getenv("RERANK_API_KEY", ""),
+            rerank_base_url=os.getenv("RERANK_BASE_URL", "https://api.siliconflow.cn/v1"),
+            rerank_model=os.getenv("RERANK_MODEL", "Qwen/Qwen3-Reranker-0.6B"),
+            rerank_timeout_seconds=int(os.getenv("RERANK_TIMEOUT_SECONDS", "30")),
+            rerank_top_k_candidates=int(os.getenv("RERANK_TOP_K_CANDIDATES", "20")),
         )
 
 

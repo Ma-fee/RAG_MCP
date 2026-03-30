@@ -69,3 +69,53 @@ def test_rebuild_passes_vlm_client_to_resource_store(tmp_path: Path) -> None:
 
     # vlm_client.describe_image should not be called (no images in md file)
     mock_vlm.describe_image.assert_not_called()
+
+
+def test_rebuild_table_entry_has_related_chunk_uri(tmp_path: Path) -> None:
+    from unittest.mock import patch
+
+    from rag_mcp.ingestion.document_model import Element
+    from rag_mcp.models import SourceDocument
+
+    corpus_dir = tmp_path / "corpus"
+    data_dir = tmp_path / "data"
+    corpus_dir.mkdir(parents=True)
+
+    elements = [
+        Element(
+            element_id="el-0",
+            element_type="text",
+            text="The following table shows specifications.",
+            heading_path="Doc > Section",
+            section_title="Section",
+            section_level=1,
+        ),
+        Element(
+            element_id="el-1",
+            element_type="table",
+            text="",
+            heading_path="Doc > Section",
+            section_title="Section",
+            section_level=1,
+            metadata={"markdown": "| A | B |\n|---|---|\n| 1 | 2 |", "data_json": "", "caption": ""},
+        ),
+    ]
+    fake_doc = SourceDocument(
+        doc_id="abc123",
+        title="doc.md",
+        relative_path="doc.md",
+        file_type="md",
+        text="The following table shows specifications.",
+        elements=elements,
+    )
+
+    with patch("rag_mcp.indexing.rebuild.load_supported_documents", return_value=[fake_doc]):
+        rebuild_keyword_index(source_dir=corpus_dir, data_dir=data_dir)
+
+    manifest = json.loads((data_dir / "active_index.json").read_text())
+    index_dir = Path(manifest["index_dir"])
+    store = json.loads((index_dir / "resource_store.json").read_text())
+
+    table_entries = [e for e in store["entries"] if e["type"] == "table"]
+    assert table_entries, "No table entries found in resource_store"
+    assert table_entries[0]["related"], f"Table entry has no related: {table_entries[0]}"

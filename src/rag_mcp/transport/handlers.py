@@ -12,11 +12,22 @@ from rag_mcp.retrieval.service import RetrievalService
 
 
 class ToolHandlers:
-    def __init__(self, data_dir: Path, embedding_provider: Any | None = None) -> None:
+    def __init__(
+        self,
+        data_dir: Path,
+        embedding_provider: Any | None = None,
+        vlm_client: Any | None = None,
+        reranker: Any | None = None,
+        rerank_top_k_candidates: int = 20,
+    ) -> None:
         self.data_dir = Path(data_dir)
         self.embedding_provider = embedding_provider
+        self.vlm_client = vlm_client
         self.retrieval = RetrievalService(
-            self.data_dir, embedding_provider=self.embedding_provider
+            self.data_dir,
+            embedding_provider=self.embedding_provider,
+            reranker=reranker,
+            rerank_top_k_candidates=rerank_top_k_candidates,
         )
         self.resources = ResourceService(self.data_dir)
 
@@ -31,6 +42,7 @@ class ToolHandlers:
                 source_dir=source_dir,
                 data_dir=self.data_dir,
                 embedding_provider=self.embedding_provider,
+                vlm_client=self.vlm_client,
             )
             return {
                 "corpus_id": result["corpus_id"],

@@ -31,6 +31,11 @@ def _make_cfg(mcp_transport: str = "stdio", embedding_api_key: str = "") -> AppC
         multimodal_base_url="https://api.siliconflow.cn/v1",
         multimodal_model="zai-org/GLM-4.6V",
         mcp_transport=mcp_transport,
+        rerank_api_key="",
+        rerank_base_url="https://api.siliconflow.cn/v1",
+        rerank_model="Qwen/Qwen3-Reranker-0.6B",
+        rerank_timeout_seconds=30,
+        rerank_top_k_candidates=20,
     )
 
 

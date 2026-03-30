@@ -97,3 +97,89 @@ def test_keyword_index_store_is_json_serializable(tmp_path: Path) -> None:
     assert raw["corpus_id"] == result["corpus_id"]
     assert isinstance(raw["entries"], list)
     assert raw["entries"]
+
+
+def test_bm25_rare_term_scores_higher_than_common_term(tmp_path: Path) -> None:
+    from rag_mcp.indexing.keyword_index import KeywordIndex, persist_keyword_store
+
+    # "common" appears in all 3 docs; "rare" appears only in doc-1
+    entries = [
+        {"text": "common word appears everywhere rare unique term", "uri": "rag://c/d#text-0", "title": "doc"},
+        {"text": "common word appears everywhere nothing special", "uri": "rag://c/d#text-1", "title": "doc"},
+        {"text": "common word appears everywhere nothing special", "uri": "rag://c/d#text-2", "title": "doc"},
+    ]
+    persist_keyword_store(index_dir=tmp_path, corpus_id="test", entries=entries)
+    index = KeywordIndex.load(tmp_path)
+
+    rare_hits = index.search("rare", top_k=1)
+    common_hits = index.search("common", top_k=1)
+
+    assert rare_hits
+    assert common_hits
+    assert rare_hits[0]["score"] > common_hits[0]["score"]
+
+
+def test_bm25_shorter_doc_scores_higher_than_longer_for_same_hit(tmp_path: Path) -> None:
+    from rag_mcp.indexing.keyword_index import KeywordIndex, persist_keyword_store
+
+    short_doc = "target word"
+    long_doc = "target " + " ".join(["padding"] * 50)
+    entries = [
+        {"text": short_doc, "uri": "rag://c/d#text-0", "title": "short"},
+        {"text": long_doc, "uri": "rag://c/d#text-1", "title": "long"},
+    ]
+    persist_keyword_store(index_dir=tmp_path, corpus_id="test", entries=entries)
+    index = KeywordIndex.load(tmp_path)
+
+    hits = index.search("target", top_k=2)
+    assert len(hits) == 2
+    short_score = next(h["score"] for h in hits if h["uri"].endswith("#text-0"))
+    long_score = next(h["score"] for h in hits if h["uri"].endswith("#text-1"))
+    assert short_score > long_score
+
+
+def test_bm25_no_match_returns_empty(tmp_path: Path) -> None:
+    from rag_mcp.indexing.keyword_index import KeywordIndex, persist_keyword_store
+
+    entries = [
+        {"text": "hello world", "uri": "rag://c/d#text-0", "title": "doc"},
+    ]
+    persist_keyword_store(index_dir=tmp_path, corpus_id="test", entries=entries)
+    index = KeywordIndex.load(tmp_path)
+
+    hits = index.search("zzznomatch", top_k=5)
+    assert hits == []
+
+
+def test_persist_keyword_store_writes_idf_and_avgdl(tmp_path: Path) -> None:
+    from rag_mcp.indexing.keyword_index import persist_keyword_store
+
+    entries = [
+        {"text": "hello world", "uri": "rag://c/d#text-0", "title": "doc"},
+        {"text": "hello python", "uri": "rag://c/d#text-1", "title": "doc"},
+    ]
+    persist_keyword_store(index_dir=tmp_path, corpus_id="test", entries=entries)
+
+    raw = json.loads((tmp_path / "keyword_store.json").read_text(encoding="utf-8"))
+    assert "idf" in raw
+    assert "avgdl" in raw
+    assert isinstance(raw["idf"], dict)
+    assert isinstance(raw["avgdl"], float)
+
+
+def test_keyword_index_loads_legacy_format_without_error(tmp_path: Path) -> None:
+    from rag_mcp.indexing.keyword_index import KeywordIndex
+
+    # Write old-format keyword_store without idf/avgdl
+    legacy = {
+        "corpus_id": "test",
+        "entries": [
+            {"text": "legacy content hello", "uri": "rag://c/d#text-0", "title": "doc"},
+        ],
+    }
+    (tmp_path / "keyword_store.json").write_text(json.dumps(legacy), encoding="utf-8")
+
+    index = KeywordIndex.load(tmp_path)
+    hits = index.search("hello", top_k=3)
+    assert hits
+    assert hits[0]["uri"] == "rag://c/d#text-0"

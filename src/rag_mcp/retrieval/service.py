@@ -10,23 +10,27 @@ from rag_mcp.indexing.vector_index import VectorIndex
 
 
 class RetrievalService:
-    def __init__(self, data_dir: Path, embedding_provider: Any | None = None) -> None:
+    def __init__(
+        self,
+        data_dir: Path,
+        embedding_provider: Any | None = None,
+        reranker: Any | None = None,
+        rerank_top_k_candidates: int = 20,
+    ) -> None:
         self.data_dir = Path(data_dir)
         self.embedding_provider = embedding_provider
+        self._reranker = reranker
+        self._rerank_top_k_candidates = rerank_top_k_candidates
 
     def search(self, query: str, mode: str, top_k: int = 5) -> dict[str, Any]:
         if mode == "keyword":
             return self._search_keyword(query=query, top_k=top_k)
         if mode == "vector":
             return self._search_vector(query=query, top_k=top_k)
-        if mode in {"hybrid", "rerank"}:
-            raise ServiceException(
-                ServiceError(
-                    code=ErrorCode.SEARCH_MODE_NOT_IMPLEMENTED,
-                    message=f"检索模式尚未实现: {mode}",
-                    hint="当前版本仅支持 keyword/vector",
-                )
-            )
+        if mode == "hybrid":
+            return self._search_hybrid(query=query, top_k=top_k)
+        if mode == "rerank":
+            return self._search_rerank(query=query, top_k=top_k)
         raise ServiceException(
             ServiceError(
                 code=ErrorCode.UNSUPPORTED_SEARCH_MODE,
@@ -97,6 +101,56 @@ class RetrievalService:
         return {
             "query": query,
             "mode": "vector",
+            "top_k": top_k,
+            "result_count": len(results),
+            "results": results,
+        }
+
+    def _search_hybrid(self, query: str, top_k: int) -> dict[str, Any]:
+        kw = self._search_keyword(query=query, top_k=top_k)
+        vec = self._search_vector(query=query, top_k=top_k)
+
+        rrf_k = 60
+        scores: dict[str, float] = {}
+        seen: dict[str, dict] = {}
+
+        for rank, hit in enumerate(kw["results"]):
+            uri = hit["uri"]
+            scores[uri] = scores.get(uri, 0.0) + 1.0 / (rrf_k + rank + 1)
+            seen[uri] = hit
+
+        for rank, hit in enumerate(vec["results"]):
+            uri = hit["uri"]
+            scores[uri] = scores.get(uri, 0.0) + 1.0 / (rrf_k + rank + 1)
+            seen[uri] = hit
+
+        ranked = sorted(scores.keys(), key=lambda u: scores[u], reverse=True)[:top_k]
+        results = [{**seen[u], "score": scores[u]} for u in ranked]
+        return {
+            "query": query,
+            "mode": "hybrid",
+            "top_k": top_k,
+            "result_count": len(results),
+            "results": results,
+        }
+
+    def _search_rerank(self, query: str, top_k: int) -> dict[str, Any]:
+        if self._reranker is None:
+            raise ServiceException(
+                ServiceError(
+                    code=ErrorCode.SEARCH_MODE_NOT_IMPLEMENTED,
+                    message="rerank 模式需要配置 RERANK_PROVIDER",
+                    hint="请设置环境变量 RERANK_PROVIDER=crossencoder 或 RERANK_PROVIDER=llm",
+                )
+            )
+        candidates = self._search_hybrid(
+            query=query, top_k=self._rerank_top_k_candidates
+        )["results"]
+        reranked = self._reranker.rerank(query=query, candidates=candidates)
+        results = reranked[:top_k]
+        return {
+            "query": query,
+            "mode": "rerank",
             "top_k": top_k,
             "result_count": len(results),
             "results": results,

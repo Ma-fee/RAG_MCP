@@ -11,14 +11,15 @@ load_dotenv()
 
 from rag_mcp.config import AppConfig
 from rag_mcp.embedding.client import EmbeddingClient
+from rag_mcp.ingestion.vlm_client import VlmClient
+from rag_mcp.retrieval.reranker import build_reranker
 from rag_mcp.transport.handlers import ToolHandlers
 from rag_mcp.transport.mcp_server import create_mcp_server
 
-# 配置根 logger
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
+    handlers=[logging.StreamHandler(sys.stderr)],
 )
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,15 @@ def main() -> None:
     logger.info("Starting RAG MCP server...")
     cfg = AppConfig.from_env()
     embedding_provider = _build_embedding_provider(cfg)
-    handlers = ToolHandlers(cfg.data_dir, embedding_provider)
+    vlm_client = VlmClient.from_config(cfg)
+    reranker = build_reranker(cfg)
+    handlers = ToolHandlers(
+        cfg.data_dir,
+        embedding_provider,
+        vlm_client,
+        reranker=reranker,
+        rerank_top_k_candidates=cfg.rerank_top_k_candidates,
+    )
     mcp = create_mcp_server(handlers)
 
     if cfg.mcp_transport == "sse":

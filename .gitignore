@@ -21,8 +21,14 @@ worktrees/
 # Runtime data
 .rag_mcp_data/
 .docling_models/
+.docling_cache/
+.element_cache/
 dataset/
 record.txt
+pico.save
+
+# macOS
+.DS_Store
 
 # Local tool configs
 .claude/

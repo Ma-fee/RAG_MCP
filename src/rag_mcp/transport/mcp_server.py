@@ -24,4 +24,9 @@ def create_mcp_server(handlers: Any) -> fastmcp.FastMCP:
     def rag_read_resource(uri: str) -> dict:
         return handlers.read_resource(uri=uri)
 
+    @mcp.resource("rag://corpus/{corpus_id}/{doc_id}#{fragment}")
+    def rag_resource(corpus_id: str, doc_id: str, fragment: str) -> dict:
+        uri = f"rag://corpus/{corpus_id}/{doc_id}#{fragment}"
+        return handlers.read_resource(uri=uri)
+
     return mcp

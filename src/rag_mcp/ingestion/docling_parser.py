@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import dataclasses
 import hashlib
+import json
+import logging
 from pathlib import Path
 from typing import Any
 
+from docling.datamodel.document import DoclingDocument
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -11,13 +15,20 @@ from docling.utils.model_downloader import download_models
 
 from rag_mcp.ingestion.document_model import Document, Element
 
+logger = logging.getLogger(__name__)
+
 # 模型存放在项目根目录下，避免散落到 ~/.cache
 _MODELS_DIR = Path(__file__).resolve().parents[3] / ".docling_models"
+_DOCLING_CACHE_DIR = Path(__file__).resolve().parents[3] / ".docling_cache"
 
-_SKIP_LABELS = {"page_header", "page_footer", "footnote"}
-_HEADING_LABELS = {"title", "section_header"}
-_TABLE_LABELS = {"table"}
-_PICTURE_LABELS = {"picture"}
+class _Label:
+    SKIP    = frozenset({"page_header", "page_footer", "footnote", "caption", "document_index"})
+    HEADING = frozenset({"title", "section_header"})
+    TABLE   = frozenset({"table"})
+    PICTURE = frozenset({"picture"})
+
+_ELEMENT_CACHE_VERSION  = "2"  # bump when parse/filter logic changes
+_PIPELINE_VERSION       = "2"  # bump when PdfPipelineOptions change
 
 
 def parse_document_file(
@@ -53,10 +64,34 @@ def parse_document_file(
 
 def _ensure_models() -> Path:
     models_dir = _MODELS_DIR
-    layout_model = models_dir / "layout" / "model.safetensors"
+    layout_model = models_dir / "docling-project--docling-layout-heron" / "model.safetensors"
     if not layout_model.exists():
         download_models(output_dir=models_dir, progress=True)
     return models_dir
+
+
+def _load_dl_doc(path: Path) -> DoclingDocument:
+    _DOCLING_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    mtime = int(path.stat().st_mtime)
+    key = hashlib.sha1(str(path.resolve()).encode()).hexdigest()[:16] + f"_{mtime}_p{_PIPELINE_VERSION}"
+    cache_file = _DOCLING_CACHE_DIR / f"{key}.json"
+    if cache_file.exists():
+        logger.debug("DoclingDocument cache hit: %s", path.name)
+        return DoclingDocument.model_validate_json(cache_file.read_text(encoding="utf-8"))
+    models_dir = _ensure_models()
+    pipeline_opts = PdfPipelineOptions(
+        artifacts_path=models_dir,
+        generate_picture_images=True,
+    )
+    converter = DocumentConverter(
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_opts)}
+    )
+    dl_doc = converter.convert(str(path)).document
+    json_str = dl_doc.model_dump_json()
+    if isinstance(json_str, str):
+        cache_file.write_text(json_str, encoding="utf-8")
+    logger.debug("DoclingDocument cached: %s", path.name)
+    return dl_doc
 
 
 def _parse_pdf_elements(
@@ -65,13 +100,7 @@ def _parse_pdf_elements(
     doc_id: str,
     assets_dir: Path,
 ) -> list[Element]:
-    models_dir = _ensure_models()
-    pipeline_opts = PdfPipelineOptions(artifacts_path=models_dir)
-    converter = DocumentConverter(
-        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_opts)}
-    )
-    result = converter.convert(str(path))
-    dl_doc = result.document
+    dl_doc = _load_dl_doc(path)
 
     elements: list[Element] = []
     heading_stack: list[str] = [title]
@@ -80,10 +109,10 @@ def _parse_pdf_elements(
     for item, _level in dl_doc.iterate_items():
         label_val = getattr(item.label, "value", str(item.label))
 
-        if label_val in _SKIP_LABELS:
+        if label_val in _Label.SKIP:
             continue
 
-        if label_val in _HEADING_LABELS:
+        if label_val in _Label.HEADING:
             text = getattr(item, "text", "").strip()
             if not text:
                 continue
@@ -104,12 +133,15 @@ def _parse_pdf_elements(
             )
             continue
 
-        if label_val in _TABLE_LABELS:
+        if label_val in _Label.TABLE:
+            if label_val == "document_index":
+                continue
             md = item.export_to_markdown(dl_doc) if hasattr(item, "export_to_markdown") else ""
-            caption = _caption_text(item)
+            caption = _caption_text(item, dl_doc)
             meta: dict[str, Any] = {
                 "markdown": md,
                 "caption": caption,
+                "data_json": _table_data_json(item),
                 **_prov_metadata(item),
             }
             elements.append(
@@ -125,8 +157,8 @@ def _parse_pdf_elements(
             )
             continue
 
-        if label_val in _PICTURE_LABELS:
-            caption = _caption_text(item)
+        if label_val in _Label.PICTURE:
+            caption = _caption_text(item, dl_doc)
             img_path = _save_picture(item, dl_doc, assets_dir, image_n)
             image_n += 1
             meta = {
@@ -180,12 +212,41 @@ def _heading_level(label_val: str, text: str) -> int:
     return 2
 
 
-def _caption_text(item: Any) -> str:
+def _table_data_json(item: Any) -> list[dict]:
+    data = getattr(item, "data", None)
+    if not data:
+        return []
+    grid = getattr(data, "grid", None)
+    if not grid:
+        return []
+    header_row = grid[0]
+    if any(getattr(cell, "column_header", False) for cell in header_row):
+        headers = [getattr(cell, "text", "").strip() for cell in header_row]
+        data_start = 1
+    else:
+        headers = [f"col_{i}" for i in range(len(header_row))]
+        data_start = 0
+    rows = []
+    for row in grid[data_start:]:
+        rows.append({
+            (headers[i] if i < len(headers) else str(i)): getattr(cell, "text", "").strip()
+            for i, cell in enumerate(row)
+        })
+    return rows
+
+
+def _caption_text(item: Any, dl_doc: Any) -> str:
     captions = getattr(item, "captions", [])
-    if captions:
-        cap = captions[0]
-        return getattr(cap, "text", str(cap)).strip()
-    return ""
+    if not captions:
+        return ""
+    ref = captions[0]
+    cref = getattr(ref, "cref", None)
+    if cref and cref.startswith("#/texts/"):
+        idx = int(cref.split("/")[-1])
+        texts = getattr(dl_doc, "texts", [])
+        if idx < len(texts):
+            return getattr(texts[idx], "text", "").strip()
+    return getattr(ref, "text", "").strip()
 
 
 def _prov_metadata(item: Any) -> dict[str, Any]:
@@ -202,7 +263,10 @@ def _save_picture(
     image_n: int,
 ) -> Path | None:
     try:
-        pil_img = item.get_image(dl_doc)
+        img_obj = getattr(item, "image", None)
+        pil_img = getattr(img_obj, "pil_image", None) if img_obj is not None else None
+        if pil_img is None:
+            pil_img = item.get_image(dl_doc)
         if pil_img is None:
             return None
         assets_dir.mkdir(parents=True, exist_ok=True)
@@ -285,3 +349,55 @@ def _parse_markdown_elements(text: str, title: str) -> list[Element]:
     if not elements:
         return _single_text_element(text=text, heading_path=title, section_title=title)
     return elements
+
+
+# ── Element-level cache ──────────────────────────────────────────────────────
+
+_ELEMENT_CACHE_DIR = Path(__file__).resolve().parents[3] / ".element_cache"
+
+
+def parse_document_file_cached(
+    path: Path,
+    root_dir: Path,
+    assets_dir: Path | None = None,
+    cache_dir: Path | None = None,
+) -> Document:
+    """Like parse_document_file but caches the resulting Document as JSON."""
+    resolved = path.resolve()
+    mtime = int(resolved.stat().st_mtime)
+    key = (
+        hashlib.sha1(str(resolved).encode()).hexdigest()[:16]
+        + f"_{mtime}_{_ELEMENT_CACHE_VERSION}"
+    )
+    cache_root = cache_dir or _ELEMENT_CACHE_DIR
+    cache_root.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_root / f"{key}.json"
+
+    if cache_file.exists():
+        logger.debug("Element cache hit: %s", path.name)
+        raw = json.loads(cache_file.read_text(encoding="utf-8"))
+        elements = [
+            Element(
+                element_id=e["element_id"],
+                element_type=e["element_type"],
+                text=e["text"],
+                heading_path=e["heading_path"],
+                section_title=e["section_title"],
+                section_level=e["section_level"],
+                metadata=e.get("metadata", {}),
+            )
+            for e in raw["elements"]
+        ]
+        return Document(
+            doc_id=raw["doc_id"],
+            title=raw["title"],
+            relative_path=raw["relative_path"],
+            file_type=raw["file_type"],
+            elements=elements,
+        )
+
+    doc = parse_document_file(path, root_dir, assets_dir=assets_dir)
+    payload = dataclasses.asdict(doc)
+    cache_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    logger.debug("Element cache written: %s", path.name)
+    return doc

@@ -22,6 +22,7 @@ def rebuild_keyword_index(
     data_dir: Path,
     chunk_size: int = 800,
     chunk_overlap: int = 120,
+    min_chunk_length: int = 30,
     embedding_provider: Any | None = None,
     vlm_client: Any | None = None,
 ) -> dict[str, Any]:
@@ -43,6 +44,7 @@ def rebuild_keyword_index(
             index_dir=temp_index_dir,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            min_chunk_length=min_chunk_length,
             embedding_provider=embedding_provider,
             vlm_client=vlm_client,
         )
@@ -77,13 +79,14 @@ def _build_and_persist_keyword_store(
     index_dir: Path,
     chunk_size: int,
     chunk_overlap: int,
+    min_chunk_length: int,
     embedding_provider: Any | None,
     vlm_client: Any | None = None,
 ) -> dict[str, int]:
     documents = sorted(
         load_supported_documents(source_dir), key=lambda item: item.relative_path
     )
-    chunker = Chunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    chunker = Chunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap, min_chunk_length=min_chunk_length)
 
     # Build ResourceStore (image/table/text resource entries) for all documents
     resource_store = ResourceStore(index_dir=index_dir, corpus_id=corpus_id, vlm_client=vlm_client)
@@ -91,18 +94,20 @@ def _build_and_persist_keyword_store(
     for doc in documents:
         all_resource_entries.extend(resource_store.build(doc))
     linked_entries = build_cross_references(all_resource_entries)
-    resource_store._persist(linked_entries)
+    # _persist is deferred until after table.related backfill below
 
     entries: list[dict[str, Any]] = []
+    element_id_to_chunk_uri: dict[str, str] = {}
     for doc in documents:
         stable_doc_id = _stable_doc_id(doc.relative_path)
         chunks: list[Chunk] = chunker.chunk_document(doc)
         attachment_meta_by_chunk = _build_attachment_metadata(doc, chunks)
         for chunk in chunks:
+            chunk_uri = f"rag://corpus/{corpus_id}/{stable_doc_id}#text-{chunk.chunk_index}"
             entry: dict[str, Any] = {
                 "text": chunk.text,
                 "title": chunk.title,
-                "uri": f"rag://corpus/{corpus_id}/{stable_doc_id}#text-{chunk.chunk_index}",
+                "uri": chunk_uri,
                 "metadata": {
                     "corpus_id": corpus_id,
                     "doc_id": stable_doc_id,
@@ -119,7 +124,18 @@ def _build_and_persist_keyword_store(
             attachment_metadata = attachment_meta_by_chunk.get(chunk.chunk_index)
             if attachment_metadata:
                 entry["resource_metadata"] = attachment_metadata
+                for elem_id in attachment_metadata.get("table_element_ids", []):
+                    element_id_to_chunk_uri[elem_id] = chunk_uri
             entries.append(entry)
+
+    # Backfill table.related with the chunk URI that absorbed the table
+    for linked_entry in linked_entries:
+        if linked_entry["type"] == "table":
+            elem_id = linked_entry.get("element_id", "")
+            chunk_uri = element_id_to_chunk_uri.get(elem_id)
+            if chunk_uri and chunk_uri not in linked_entry["related"]:
+                linked_entry["related"].append(chunk_uri)
+    resource_store._persist(linked_entries)
 
     persist_keyword_store(index_dir=index_dir, corpus_id=corpus_id, entries=entries)
 
@@ -187,6 +203,14 @@ def _build_attachment_metadata(
         text_chunk_index = element_to_chunk_index.get(element.element_id)
         if text_chunk_index is not None:
             last_text_chunk_by_context[context] = text_chunk_index
+            if element.element_type in {"table", "image"}:
+                bucket = attachments.setdefault(
+                    text_chunk_index, {"table_element_ids": [], "image_element_ids": []}
+                )
+                if element.element_type == "table":
+                    bucket["table_element_ids"].append(element.element_id)
+                else:
+                    bucket["image_element_ids"].append(element.element_id)
             continue
         if element.element_type not in {"table", "image"}:
             continue

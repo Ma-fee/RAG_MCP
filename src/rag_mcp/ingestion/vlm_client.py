@@ -3,10 +3,14 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 
 from rag_mcp.errors import ErrorCode, ServiceError, ServiceException
+
+if TYPE_CHECKING:
+    from rag_mcp.config import AppConfig
 
 
 @dataclass
@@ -15,6 +19,17 @@ class VlmClient:
     base_url: str
     model: str
     timeout: int = 60
+
+    @classmethod
+    def from_config(cls, cfg: "AppConfig") -> "VlmClient | None":
+        api_key = cfg.multimodal_api_key.strip()
+        if not api_key:
+            return None
+        return cls(
+            api_key=api_key,
+            base_url=cfg.multimodal_base_url.rstrip("/"),
+            model=cfg.multimodal_model,
+        )
 
     def describe_image(self, image_path: Path) -> str:
         image_data = base64.b64encode(Path(image_path).read_bytes()).decode()
@@ -40,4 +55,6 @@ class VlmClient:
                 message=f"VLM API error: {resp.status_code}",
                 hint=resp.text[:200],
             ))
-        return resp.json()["choices"][0]["message"]["content"]
+        # 支持reasoning_content字段（某些推理模型的特殊格式）
+        message = resp.json()["choices"][0]["message"]
+        return message.get("reasoning_content") or message.get("content", "")

@@ -9,6 +9,7 @@ from rag_mcp.ingestion.filesystem import load_supported_documents
 
 def _make_mock_converter():
     mock_doc = MagicMock()
+    mock_doc.model_dump_json.return_value = "{}"
     mock_doc.iterate_items.return_value = []
     mock_result = MagicMock()
     mock_result.document = mock_doc
@@ -45,7 +46,7 @@ def test_load_supported_documents_includes_pdf(tmp_path: Path) -> None:
     (tmp_path / "spec.pdf").write_bytes(b"%PDF-1.4")
     (tmp_path / "ignore.json").write_text("{}", encoding="utf-8")
 
-    with patch("rag_mcp.ingestion.filesystem.parse_document_file") as mock_parse:
+    with patch("rag_mcp.ingestion.filesystem.parse_document_file_cached") as mock_parse:
         from rag_mcp.ingestion.document_model import Document, Element
         def fake_parse(path, root_dir, **kwargs):
             rel = path.relative_to(root_dir).as_posix()

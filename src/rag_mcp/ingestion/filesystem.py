@@ -3,19 +3,19 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from rag_mcp.ingestion.docling_parser import parse_document_file
+from rag_mcp.ingestion.docling_parser import parse_document_file_cached
 from rag_mcp.models import SourceDocument
 
 SUPPORTED_EXTENSIONS = {".md", ".txt", ".pdf"}
 
 
-def load_supported_documents(directory: Path) -> list[SourceDocument]:
+def load_supported_documents(directory: Path, cache_dir: Path | None = None) -> list[SourceDocument]:
     docs: list[SourceDocument] = []
     for path in sorted(directory.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in SUPPORTED_EXTENSIONS:
             continue
 
-        parsed = parse_document_file(path, directory)
+        parsed = parse_document_file_cached(path, directory, cache_dir=cache_dir)
         relative_path = parsed.relative_path
         file_type = parsed.file_type
         text = " ".join(

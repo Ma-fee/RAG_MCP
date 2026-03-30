@@ -16,21 +16,24 @@ class _Segment:
 
 
 class ChunkAssembler:
-    def __init__(self, chunk_size: int = 800, chunk_overlap: int = 120) -> None:
+    def __init__(self, chunk_size: int = 800, chunk_overlap: int = 120, min_chunk_length: int = 0) -> None:
         if chunk_size <= 0:
             raise ValueError("chunk_size must be > 0")
         if chunk_overlap < 0:
             raise ValueError("chunk_overlap must be >= 0")
         if chunk_overlap >= chunk_size:
             raise ValueError("chunk_overlap must be < chunk_size")
+        if min_chunk_length < 0:
+            raise ValueError("min_chunk_length must be >= 0")
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+        self.min_chunk_length = min_chunk_length
 
     def assemble(self, document: SourceDocument) -> list[Chunk]:
-        segments = list(_group_text_segments(document, self.chunk_size))
+        segments = list(_group_text_segments(document, self.chunk_size, self.min_chunk_length))
         if not segments:
             fallback_text = " ".join(document.text.split()).strip()
-            if not fallback_text:
+            if not fallback_text or len(fallback_text) < self.min_chunk_length:
                 return []
             segments = [
                 _Segment(
@@ -71,7 +74,7 @@ class ChunkAssembler:
 
 
 def _group_text_segments(
-    document: SourceDocument, chunk_size: int
+    document: SourceDocument, chunk_size: int, min_chunk_length: int = 0
 ) -> Iterable[_Segment]:
     current_heading_path = ""
     current_section_title = ""
@@ -81,7 +84,7 @@ def _group_text_segments(
 
     def flush() -> _Segment | None:
         text = " ".join(current_text.split()).strip()
-        if not text:
+        if not text or len(text) < min_chunk_length:
             return None
         return _Segment(
             heading_path=current_heading_path,
@@ -92,7 +95,7 @@ def _group_text_segments(
         )
 
     for element in document.elements:
-        if element.element_type not in {"text", "list", "code_block"}:
+        if element.element_type not in {"text", "list", "code_block", "heading", "table"}:
             continue
         text = " ".join(element.text.split()).strip()
         if not text:
