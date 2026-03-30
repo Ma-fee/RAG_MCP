@@ -86,7 +86,7 @@ def _build_and_persist_keyword_store(
     documents = sorted(
         load_supported_documents(source_dir), key=lambda item: item.relative_path
     )
-    chunker = Chunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap, min_chunk_length=min_chunk_length)
+    chunker = Chunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap, min_chunk_length=min_chunk_length, source_dir=source_dir)
 
     # Build ResourceStore (image/table/text resource entries) for all documents
     resource_store = ResourceStore(index_dir=index_dir, corpus_id=corpus_id, vlm_client=vlm_client)

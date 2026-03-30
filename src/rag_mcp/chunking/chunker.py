@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
 from rag_mcp.chunking.assembler import ChunkAssembler
@@ -16,7 +17,13 @@ class _Section:
 
 
 class Chunker:
-    def __init__(self, chunk_size: int = 800, chunk_overlap: int = 120, min_chunk_length: int = 0) -> None:
+    def __init__(
+        self,
+        chunk_size: int = 800,
+        chunk_overlap: int = 120,
+        min_chunk_length: int = 0,
+        source_dir: Path | None = None,
+    ) -> None:
         if chunk_size <= 0:
             raise ValueError("chunk_size must be > 0")
         if chunk_overlap < 0:
@@ -28,8 +35,20 @@ class Chunker:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.min_chunk_length = min_chunk_length
+        self.source_dir = source_dir
 
     def chunk_document(self, document: SourceDocument) -> list[Chunk]:
+        # For PDFs with embedded TOC, use TocAwareChunker for semantic boundaries
+        if document.file_type == "pdf" and self.source_dir is not None:
+            from rag_mcp.chunking.toc_chunker import TocAwareChunker
+            pdf_path = self.source_dir / document.relative_path
+            if pdf_path.exists():
+                toc_chunks = TocAwareChunker(
+                    min_chunk_length=self.min_chunk_length
+                ).chunk_document(document, pdf_path)
+                if toc_chunks:
+                    return toc_chunks
+
         if document.elements:
             return ChunkAssembler(
                 chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap, min_chunk_length=self.min_chunk_length
