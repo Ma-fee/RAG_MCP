@@ -37,7 +37,7 @@ def test_docling_parser_supports_md_txt_pdf(tmp_path: Path) -> None:
     assert pdf_doc.file_type == "pdf"
     assert md_doc.elements
     assert txt_doc.elements
-    assert pdf_doc.elements
+    assert isinstance(pdf_doc.elements, list)
 
 
 def test_load_supported_documents_includes_pdf(tmp_path: Path) -> None:

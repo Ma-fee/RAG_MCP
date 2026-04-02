@@ -2,9 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-from rag_mcp.errors import ErrorCode, ServiceException
 from rag_mcp.indexing.manifest import read_active_manifest
 from rag_mcp.indexing.rebuild import rebuild_keyword_index
 from rag_mcp.indexing.vector_index import VectorIndex
@@ -141,7 +138,7 @@ def test_manifest_records_embedding_model_and_dimension(tmp_path: Path) -> None:
     assert manifest["embedding_dimension"] == 6
 
 
-def test_vector_mode_reports_config_mismatch_but_keyword_still_works(
+def test_retrieval_still_works_with_embedding_config_difference(
     tmp_path: Path,
 ) -> None:
     corpus_dir = tmp_path / "corpus"
@@ -159,9 +156,6 @@ def test_vector_mode_reports_config_mismatch_but_keyword_still_works(
     )
 
     retrieval = RetrievalService(data_dir=data_dir, embedding_provider=query_provider)
-    keyword_payload = retrieval.search(query="alpha", mode="keyword", top_k=2)
-    assert keyword_payload["result_count"] >= 1
-
-    with pytest.raises(ServiceException) as exc:
-        retrieval.search(query="alpha", mode="vector", top_k=2)
-    assert exc.value.error.code == ErrorCode.VECTOR_INDEX_CONFIG_MISMATCH
+    payload = retrieval.search(query="alpha", top_k=2)
+    assert payload["result_count"] >= 1
+    assert payload["mode"] == "rerank"

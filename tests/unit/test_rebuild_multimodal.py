@@ -2,23 +2,69 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+import pytest
+
+from rag_mcp.ingestion.document_model import Element
 from rag_mcp.indexing.rebuild import rebuild_keyword_index
+from rag_mcp.models import Chunk, SourceDocument
 
 
-def _write_corpus(d: Path) -> None:
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "doc.md").write_text("# Chapter 1\n\n## Section\n\nhello world text", encoding="utf-8")
-    (d / "notes.txt").write_text("plain text notes", encoding="utf-8")
+def _make_pdf_doc(elements: list[Element], relative_path: str = "manual.pdf") -> SourceDocument:
+    return SourceDocument(
+        doc_id="pdf-doc",
+        title=relative_path,
+        relative_path=relative_path,
+        file_type="pdf",
+        text=" ".join(e.text for e in elements).strip(),
+        elements=elements,
+    )
+
+
+def _make_toc_chunks(doc: SourceDocument, source_element_ids: list[str], text: str = "toc chunk text") -> list[Chunk]:
+    return [
+        Chunk(
+            chunk_id=f"{doc.doc_id}#toc-0",
+            doc_id=doc.doc_id,
+            text=text,
+            chunk_index=0,
+            source_element_ids=source_element_ids,
+            heading_path="1 Intro",
+            section_title="1 Intro",
+            section_level=1,
+            title=doc.title,
+            file_type="pdf",
+            relative_path=doc.relative_path,
+            metadata={"page_start": 1, "page_end": 1, "toc_level": 1},
+        )
+    ]
 
 
 def test_rebuild_creates_resource_store_json(tmp_path: Path) -> None:
     corpus_dir = tmp_path / "corpus"
     data_dir = tmp_path / "data"
-    _write_corpus(corpus_dir)
+    corpus_dir.mkdir(parents=True)
+    (corpus_dir / "manual.pdf").write_bytes(b"%PDF-1.4")
 
-    rebuild_keyword_index(source_dir=corpus_dir, data_dir=data_dir)
+    elements = [
+        Element(
+            element_id="el-0",
+            element_type="text",
+            text="hello world",
+            heading_path="1 Intro",
+            section_title="1 Intro",
+            section_level=1,
+            metadata={"page_number": 1},
+        )
+    ]
+    pdf_doc = _make_pdf_doc(elements)
+
+    with (
+        patch("rag_mcp.indexing.rebuild.load_supported_documents", return_value=[pdf_doc]),
+        patch("rag_mcp.indexing.rebuild.TocAwareChunker.chunk_document", return_value=_make_toc_chunks(pdf_doc, ["el-0"])),
+    ):
+        rebuild_keyword_index(source_dir=corpus_dir, data_dir=data_dir)
 
     manifest = json.loads((data_dir / "active_index.json").read_text())
     index_dir = Path(manifest["index_dir"])
@@ -28,9 +74,27 @@ def test_rebuild_creates_resource_store_json(tmp_path: Path) -> None:
 def test_rebuild_resource_store_has_text_entries(tmp_path: Path) -> None:
     corpus_dir = tmp_path / "corpus"
     data_dir = tmp_path / "data"
-    _write_corpus(corpus_dir)
+    corpus_dir.mkdir(parents=True)
+    (corpus_dir / "manual.pdf").write_bytes(b"%PDF-1.4")
 
-    rebuild_keyword_index(source_dir=corpus_dir, data_dir=data_dir)
+    elements = [
+        Element(
+            element_id="el-0",
+            element_type="text",
+            text="hello world",
+            heading_path="1 Intro",
+            section_title="1 Intro",
+            section_level=1,
+            metadata={"page_number": 1},
+        )
+    ]
+    pdf_doc = _make_pdf_doc(elements)
+
+    with (
+        patch("rag_mcp.indexing.rebuild.load_supported_documents", return_value=[pdf_doc]),
+        patch("rag_mcp.indexing.rebuild.TocAwareChunker.chunk_document", return_value=_make_toc_chunks(pdf_doc, ["el-0"])),
+    ):
+        rebuild_keyword_index(source_dir=corpus_dir, data_dir=data_dir)
 
     manifest = json.loads((data_dir / "active_index.json").read_text())
     index_dir = Path(manifest["index_dir"])
@@ -45,9 +109,27 @@ def test_rebuild_resource_store_has_text_entries(tmp_path: Path) -> None:
 def test_rebuild_keyword_store_uri_uses_text_prefix(tmp_path: Path) -> None:
     corpus_dir = tmp_path / "corpus"
     data_dir = tmp_path / "data"
-    _write_corpus(corpus_dir)
+    corpus_dir.mkdir(parents=True)
+    (corpus_dir / "manual.pdf").write_bytes(b"%PDF-1.4")
 
-    rebuild_keyword_index(source_dir=corpus_dir, data_dir=data_dir)
+    elements = [
+        Element(
+            element_id="el-0",
+            element_type="text",
+            text="hello world",
+            heading_path="1 Intro",
+            section_title="1 Intro",
+            section_level=1,
+            metadata={"page_number": 1},
+        )
+    ]
+    pdf_doc = _make_pdf_doc(elements)
+
+    with (
+        patch("rag_mcp.indexing.rebuild.load_supported_documents", return_value=[pdf_doc]),
+        patch("rag_mcp.indexing.rebuild.TocAwareChunker.chunk_document", return_value=_make_toc_chunks(pdf_doc, ["el-0"])),
+    ):
+        rebuild_keyword_index(source_dir=corpus_dir, data_dir=data_dir)
 
     manifest = json.loads((data_dir / "active_index.json").read_text())
     index_dir = Path(manifest["index_dir"])
@@ -61,22 +143,34 @@ def test_rebuild_keyword_store_uri_uses_text_prefix(tmp_path: Path) -> None:
 def test_rebuild_passes_vlm_client_to_resource_store(tmp_path: Path) -> None:
     corpus_dir = tmp_path / "corpus"
     data_dir = tmp_path / "data"
-    corpus_dir.mkdir(parents=True, exist_ok=True)
-    (corpus_dir / "doc.md").write_text("# A\n\ncontent", encoding="utf-8")
+    corpus_dir.mkdir(parents=True)
+    (corpus_dir / "manual.pdf").write_bytes(b"%PDF-1.4")
+
+    elements = [
+        Element(
+            element_id="el-0",
+            element_type="text",
+            text="hello world",
+            heading_path="1 Intro",
+            section_title="1 Intro",
+            section_level=1,
+            metadata={"page_number": 1},
+        )
+    ]
+    pdf_doc = _make_pdf_doc(elements)
 
     mock_vlm = MagicMock()
-    rebuild_keyword_index(source_dir=corpus_dir, data_dir=data_dir, vlm_client=mock_vlm)
+    with (
+        patch("rag_mcp.indexing.rebuild.load_supported_documents", return_value=[pdf_doc]),
+        patch("rag_mcp.indexing.rebuild.TocAwareChunker.chunk_document", return_value=_make_toc_chunks(pdf_doc, ["el-0"])),
+    ):
+        rebuild_keyword_index(source_dir=corpus_dir, data_dir=data_dir, vlm_client=mock_vlm)
 
     # vlm_client.describe_image should not be called (no images in md file)
     mock_vlm.describe_image.assert_not_called()
 
 
 def test_rebuild_table_entry_has_related_chunk_uri(tmp_path: Path) -> None:
-    from unittest.mock import patch
-
-    from rag_mcp.ingestion.document_model import Element
-    from rag_mcp.models import SourceDocument
-
     corpus_dir = tmp_path / "corpus"
     data_dir = tmp_path / "data"
     corpus_dir.mkdir(parents=True)
@@ -102,14 +196,21 @@ def test_rebuild_table_entry_has_related_chunk_uri(tmp_path: Path) -> None:
     ]
     fake_doc = SourceDocument(
         doc_id="abc123",
-        title="doc.md",
-        relative_path="doc.md",
-        file_type="md",
+        title="manual.pdf",
+        relative_path="manual.pdf",
+        file_type="pdf",
         text="The following table shows specifications.",
         elements=elements,
     )
+    (corpus_dir / "manual.pdf").write_bytes(b"%PDF-1.4")
 
-    with patch("rag_mcp.indexing.rebuild.load_supported_documents", return_value=[fake_doc]):
+    with (
+        patch("rag_mcp.indexing.rebuild.load_supported_documents", return_value=[fake_doc]),
+        patch(
+            "rag_mcp.indexing.rebuild.TocAwareChunker.chunk_document",
+            return_value=_make_toc_chunks(fake_doc, ["el-0", "el-1"], text="The following table shows specifications."),
+        ),
+    ):
         rebuild_keyword_index(source_dir=corpus_dir, data_dir=data_dir)
 
     manifest = json.loads((data_dir / "active_index.json").read_text())
@@ -119,3 +220,91 @@ def test_rebuild_table_entry_has_related_chunk_uri(tmp_path: Path) -> None:
     table_entries = [e for e in store["entries"] if e["type"] == "table"]
     assert table_entries, "No table entries found in resource_store"
     assert table_entries[0]["related"], f"Table entry has no related: {table_entries[0]}"
+
+
+def test_rebuild_pdf_uses_toc_chunker_without_chunk_size_fallback(tmp_path: Path) -> None:
+    corpus_dir = tmp_path / "corpus"
+    data_dir = tmp_path / "data"
+    corpus_dir.mkdir(parents=True)
+    (corpus_dir / "manual.pdf").write_bytes(b"%PDF-1.4")
+
+    pdf_doc = _make_pdf_doc(
+        [
+            Element(
+                element_id="el-0",
+                element_type="text",
+                text="short",
+                heading_path="1 Intro",
+                section_title="1 Intro",
+                section_level=1,
+                metadata={"page_number": 1},
+            )
+        ]
+    )
+    toc_chunks = _make_toc_chunks(pdf_doc, ["el-0"])
+
+    with (
+        patch("rag_mcp.indexing.rebuild.load_supported_documents", return_value=[pdf_doc]),
+        patch("rag_mcp.indexing.rebuild.TocAwareChunker.chunk_document", return_value=toc_chunks) as mock_toc_chunk,
+    ):
+        rebuild_keyword_index(source_dir=corpus_dir, data_dir=data_dir, chunk_size=1, chunk_overlap=0)
+
+    mock_toc_chunk.assert_called_once()
+
+    manifest = json.loads((data_dir / "active_index.json").read_text())
+    index_dir = Path(manifest["index_dir"])
+    kw_store = json.loads((index_dir / "keyword_store.json").read_text())
+
+    assert len(kw_store["entries"]) == 1
+    assert kw_store["entries"][0]["text"] == "toc chunk text"
+
+
+def test_rebuild_pdf_raises_when_toc_chunking_not_satisfied(tmp_path: Path) -> None:
+    corpus_dir = tmp_path / "corpus"
+    data_dir = tmp_path / "data"
+    corpus_dir.mkdir(parents=True)
+    (corpus_dir / "manual.pdf").write_bytes(b"%PDF-1.4")
+
+    pdf_doc = SourceDocument(
+        doc_id="pdf-doc",
+        title="manual.pdf",
+        relative_path="manual.pdf",
+        file_type="pdf",
+        text="",
+        elements=[],
+    )
+
+    with (
+        patch("rag_mcp.indexing.rebuild.load_supported_documents", return_value=[pdf_doc]),
+        patch("rag_mcp.indexing.rebuild.TocAwareChunker.chunk_document", return_value=[]),
+    ):
+        with pytest.raises(RuntimeError, match="TOC chunking failed for PDF"):
+            rebuild_keyword_index(source_dir=corpus_dir, data_dir=data_dir)
+
+
+def test_rebuild_rejects_non_pdf_in_toc_only_mode(tmp_path: Path) -> None:
+    corpus_dir = tmp_path / "corpus"
+    data_dir = tmp_path / "data"
+    corpus_dir.mkdir(parents=True)
+
+    md_doc = SourceDocument(
+        doc_id="md-doc",
+        title="doc.md",
+        relative_path="doc.md",
+        file_type="md",
+        text="hello",
+        elements=[
+            Element(
+                element_id="el-0",
+                element_type="text",
+                text="hello",
+                heading_path="doc.md",
+                section_title="doc.md",
+                section_level=0,
+            )
+        ],
+    )
+
+    with patch("rag_mcp.indexing.rebuild.load_supported_documents", return_value=[md_doc]):
+        with pytest.raises(RuntimeError, match="TOC-only indexing supports PDF only"):
+            rebuild_keyword_index(source_dir=corpus_dir, data_dir=data_dir)

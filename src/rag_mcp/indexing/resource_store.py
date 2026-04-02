@@ -66,7 +66,6 @@ class ResourceStore:
             "element_id": element.element_id,
             "heading_path": element.heading_path,
             "image_path": element.metadata.get("image_path", ""),
-            "caption": element.metadata.get("caption", ""),
             "page_number": element.metadata.get("page_number"),
             "vlm_description": vlm_description,
             "related": [],
@@ -81,7 +80,6 @@ class ResourceStore:
             "heading_path": element.heading_path,
             "markdown": element.metadata.get("markdown", ""),
             "data_json": element.metadata.get("data_json", ""),
-            "caption": element.metadata.get("caption", ""),
             "page_number": element.metadata.get("page_number"),
             "related": [],
         }

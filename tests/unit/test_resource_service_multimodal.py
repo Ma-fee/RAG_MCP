@@ -48,7 +48,6 @@ def test_read_image_uri_returns_vlm_description(tmp_path: Path) -> None:
             "doc_id": doc_id,
             "element_id": "el-img-0",
             "image_path": "/some/path/image-0.png",
-            "caption": "图3-5",
             "page_number": 1,
             "vlm_description": "液压泵结构图",
             "related": [],
@@ -61,7 +60,6 @@ def test_read_image_uri_returns_vlm_description(tmp_path: Path) -> None:
     assert result["uri"] == uri
     assert result["type"] == "image"
     assert result["vlm_description"] == "液压泵结构图"
-    assert result["caption"] == "图3-5"
 
 
 def test_read_table_uri_returns_markdown(tmp_path: Path) -> None:
@@ -80,7 +78,6 @@ def test_read_table_uri_returns_markdown(tmp_path: Path) -> None:
             "element_id": "el-tbl-0",
             "markdown": "| a | b |\n|---|---|\n| 1 | 2 |",
             "data_json": "",
-            "caption": "表3-2",
             "page_number": 2,
             "related": [],
         }
@@ -92,7 +89,6 @@ def test_read_table_uri_returns_markdown(tmp_path: Path) -> None:
     assert result["uri"] == uri
     assert result["type"] == "table"
     assert "| a | b |" in result["markdown"]
-    assert result["caption"] == "表3-2"
 
 
 def test_read_text_uri_still_works(tmp_path: Path) -> None:

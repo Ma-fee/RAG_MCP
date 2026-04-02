@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import json
+
 from rag_mcp.transport.handlers import ToolHandlers
 
 
@@ -36,7 +38,7 @@ def test_search_returns_dict(tmp_path: Path) -> None:
         "results": [{"uri": "rag://corpus/c/d#text-0", "text": "hello", "title": "t", "score": 1.0, "metadata": {}}]
     }
     h.retrieval = mock_retrieval
-    result = h.search(query="hello", mode="keyword", top_k=3)
+    result = h.search(query="hello", top_k=3)
     assert isinstance(result, dict)
     assert "results" in result or "error" in result
 
@@ -54,3 +56,99 @@ def test_read_resource_returns_dict(tmp_path: Path) -> None:
     result = h.read_resource(uri="rag://corpus/c/d#text-0")
     assert isinstance(result, dict)
     assert "uri" in result or "error" in result
+
+
+def _write_active_keyword_store(tmp_path: Path) -> None:
+    index_dir = tmp_path / "indexes" / "idx-test"
+    index_dir.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "active_index.json").write_text(
+        json.dumps(
+            {
+                "corpus_id": "c1",
+                "index_dir": str(index_dir),
+                "indexed_at": 0,
+                "document_count": 1,
+                "chunk_count": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+    payload = {
+        "corpus_id": "c1",
+        "entries": [
+            {
+                "text": "A",
+                "title": "1 前言",
+                "uri": "rag://corpus/c1/d1#text-0",
+                "metadata": {
+                    "relative_path": "manuals/doc.pdf",
+                    "file_type": "pdf",
+                    "chunk_index": 0,
+                    "heading_path": "1 前言",
+                    "section_title": "1 前言",
+                    "section_level": 1,
+                },
+                "related_resource_uris": [],
+            },
+            {
+                "text": "B",
+                "title": "1.1 安全",
+                "uri": "rag://corpus/c1/d1#text-1",
+                "metadata": {
+                    "relative_path": "manuals/doc.pdf",
+                    "file_type": "pdf",
+                    "chunk_index": 1,
+                    "heading_path": "1 前言 > 1.1 安全",
+                    "section_title": "1.1 安全",
+                    "section_level": 2,
+                },
+                "related_resource_uris": ["rag://corpus/c1/d1#image-0"],
+            },
+        ],
+    }
+    (index_dir / "keyword_store.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def test_list_filenames_returns_dict(tmp_path: Path) -> None:
+    _write_active_keyword_store(tmp_path)
+    h = _make_handlers(tmp_path)
+    result = h.list_filenames()
+    assert isinstance(result, dict)
+    assert result["count"] == 1
+    assert result["filenames"][0]["filename"] == "doc"
+
+
+def test_list_sections_returns_dict(tmp_path: Path) -> None:
+    _write_active_keyword_store(tmp_path)
+    h = _make_handlers(tmp_path)
+    result = h.list_sections("doc")
+    assert isinstance(result, dict)
+    assert result["section_count"] == 2
+    assert result["sections"][0]["title"] == "1 前言"
+
+
+def test_section_retrieval_returns_dict(tmp_path: Path) -> None:
+    _write_active_keyword_store(tmp_path)
+    h = _make_handlers(tmp_path)
+    result = h.section_retrieval(
+        title=["1.1 安全"],
+        filename="doc",
+        description="安全",
+        top_k=5,
+    )
+    assert isinstance(result, dict)
+    assert result["result_count"] == 1
+    assert result["results"][0]["title"] == "1.1 安全"
+
+
+def test_section_retrieval_invalid_title_returns_error(tmp_path: Path) -> None:
+    _write_active_keyword_store(tmp_path)
+    h = _make_handlers(tmp_path)
+    result = h.section_retrieval(
+        title=["不存在章节"],
+        filename="doc",
+    )
+    assert isinstance(result, dict)
+    assert result["error"] == "invalid_title"

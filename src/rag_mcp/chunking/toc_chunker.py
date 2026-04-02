@@ -23,10 +23,13 @@ def _extract_toc_nodes(pdf_path: Path) -> list[_TocNode]:
     except ImportError:
         return []
 
-    doc = fitz.open(str(pdf_path))
-    raw_toc = doc.get_toc()  # [(level, title, page), ...]
-    total_pages = doc.page_count
-    doc.close()
+    try:
+        doc = fitz.open(str(pdf_path))
+        raw_toc = doc.get_toc()  # [(level, title, page), ...]
+        total_pages = doc.page_count
+        doc.close()
+    except Exception:
+        return []
 
     if not raw_toc:
         return []
@@ -76,11 +79,7 @@ def _assemble_text(elements: list[Any]) -> str:
             parts.append(e.text.strip())
         elif e.element_type in ("text", "list", "code_block"):
             parts.append(e.text.strip())
-        elif e.element_type == "table":
-            md = e.metadata.get("markdown") or e.text
-            if md:
-                parts.append(md.strip())
-        # image elements are skipped here; CrossReference handles them
+        # table/image elements are skipped here; recall via cross-reference mapping
     return "\n".join(p for p in parts if p)
 
 

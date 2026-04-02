@@ -7,14 +7,13 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from rag_mcp.chunking.chunker import Chunker
-from rag_mcp.indexing.cross_reference import build_cross_references
+from rag_mcp.chunking.toc_chunker import TocAwareChunker
 from rag_mcp.indexing.keyword_index import persist_keyword_store
 from rag_mcp.indexing.manifest import read_active_manifest, write_active_manifest_atomic
 from rag_mcp.indexing.resource_store import ResourceStore
 from rag_mcp.indexing.vector_index import VectorIndex
 from rag_mcp.ingestion.filesystem import load_supported_documents
-from rag_mcp.models import Chunk, SourceDocument
+from rag_mcp.models import Chunk
 
 
 def rebuild_keyword_index(
@@ -42,8 +41,6 @@ def rebuild_keyword_index(
             source_dir=source_dir,
             corpus_id=corpus_id,
             index_dir=temp_index_dir,
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
             min_chunk_length=min_chunk_length,
             embedding_provider=embedding_provider,
             vlm_client=vlm_client,
@@ -77,33 +74,61 @@ def _build_and_persist_keyword_store(
     source_dir: Path,
     corpus_id: str,
     index_dir: Path,
-    chunk_size: int,
-    chunk_overlap: int,
     min_chunk_length: int,
     embedding_provider: Any | None,
     vlm_client: Any | None = None,
 ) -> dict[str, int]:
-    documents = sorted(
-        load_supported_documents(source_dir), key=lambda item: item.relative_path
-    )
-    chunker = Chunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap, min_chunk_length=min_chunk_length, source_dir=source_dir)
+    documents = sorted(load_supported_documents(source_dir), key=lambda item: item.relative_path)
 
     # Build ResourceStore (image/table/text resource entries) for all documents
     resource_store = ResourceStore(index_dir=index_dir, corpus_id=corpus_id, vlm_client=vlm_client)
     all_resource_entries: list[dict[str, Any]] = []
     for doc in documents:
         all_resource_entries.extend(resource_store.build(doc))
-    linked_entries = build_cross_references(all_resource_entries)
-    # _persist is deferred until after table.related backfill below
+    resource_entry_by_uri = {entry["uri"]: entry for entry in all_resource_entries}
 
     entries: list[dict[str, Any]] = []
-    element_id_to_chunk_uri: dict[str, str] = {}
     for doc in documents:
         stable_doc_id = _stable_doc_id(doc.relative_path)
-        chunks: list[Chunk] = chunker.chunk_document(doc)
-        attachment_meta_by_chunk = _build_attachment_metadata(doc, chunks)
+        doc_element_to_resource_uri = _build_doc_element_resource_uri_map(doc, all_resource_entries)
+        if doc.file_type != "pdf":
+            raise RuntimeError(
+                f"TOC-only indexing supports PDF only, got {doc.file_type}: {doc.relative_path}"
+            )
+
+        try:
+            pdf_path = source_dir / doc.relative_path
+            if not pdf_path.exists():
+                raise FileNotFoundError(f"pdf file not found: {pdf_path}")
+
+            chunks = TocAwareChunker(min_chunk_length=min_chunk_length).chunk_document(
+                doc, pdf_path
+            )
+            if not chunks:
+                raise ValueError(
+                    f"toc chunking produced no chunks for {doc.relative_path}; ensure PDF has embedded TOC and enough text"
+                )
+        except Exception as exc:
+            raise RuntimeError(
+                f"TOC chunking failed for PDF {doc.relative_path}"
+            ) from exc
+
         for chunk in chunks:
             chunk_uri = f"rag://corpus/{corpus_id}/{stable_doc_id}#text-{chunk.chunk_index}"
+            related_resource_uris = _chunk_related_resource_uris(
+                chunk=chunk,
+                element_to_resource_uri=doc_element_to_resource_uri,
+            )
+            resource_metadata = _resource_metadata_for_chunk(chunk=chunk, document=doc)
+
+            for resource_uri in related_resource_uris:
+                resource_entry = resource_entry_by_uri.get(resource_uri)
+                if resource_entry is None:
+                    continue
+                related = resource_entry.setdefault("related", [])
+                if chunk_uri not in related:
+                    related.append(chunk_uri)
+
             entry: dict[str, Any] = {
                 "text": chunk.text,
                 "title": chunk.title,
@@ -113,29 +138,19 @@ def _build_and_persist_keyword_store(
                     "doc_id": stable_doc_id,
                     "chunk_index": chunk.chunk_index,
                     "file_type": chunk.file_type,
-                    "title": chunk.title,
                     "section_title": chunk.section_title,
                     "heading_path": chunk.heading_path,
                     "section_level": chunk.section_level,
                     "relative_path": chunk.relative_path,
                     "chunk_length": len(chunk.text),
                 },
+                "related_resource_uris": related_resource_uris,
             }
-            attachment_metadata = attachment_meta_by_chunk.get(chunk.chunk_index)
-            if attachment_metadata:
-                entry["resource_metadata"] = attachment_metadata
-                for elem_id in attachment_metadata.get("table_element_ids", []):
-                    element_id_to_chunk_uri[elem_id] = chunk_uri
+            if resource_metadata:
+                entry["resource_metadata"] = resource_metadata
             entries.append(entry)
 
-    # Backfill table.related with the chunk URI that absorbed the table
-    for linked_entry in linked_entries:
-        if linked_entry["type"] == "table":
-            elem_id = linked_entry.get("element_id", "")
-            chunk_uri = element_id_to_chunk_uri.get(elem_id)
-            if chunk_uri and chunk_uri not in linked_entry["related"]:
-                linked_entry["related"].append(chunk_uri)
-    resource_store._persist(linked_entries)
+    resource_store._persist(all_resource_entries)
 
     persist_keyword_store(index_dir=index_dir, corpus_id=corpus_id, entries=entries)
 
@@ -181,56 +196,47 @@ def _entry_id(entry: dict[str, Any]) -> str:
     return f"{meta['doc_id']}#text-{meta['chunk_index']}"
 
 
-def _build_attachment_metadata(
-    document: SourceDocument, chunks: list[Chunk]
-) -> dict[int, dict[str, list[str]]]:
-    if not document.elements or not chunks:
-        return {}
-
-    element_to_chunk_index: dict[str, int] = {}
-    for chunk in chunks:
-        for element_id in chunk.source_element_ids:
-            element_to_chunk_index[element_id] = chunk.chunk_index
-
-    if not element_to_chunk_index:
-        return {}
-
-    last_text_chunk_by_context: dict[tuple[str, str, int], int] = {}
-    attachments: dict[int, dict[str, list[str]]] = {}
-
-    for element in document.elements:
-        context = (element.heading_path, element.section_title, element.section_level)
-        text_chunk_index = element_to_chunk_index.get(element.element_id)
-        if text_chunk_index is not None:
-            last_text_chunk_by_context[context] = text_chunk_index
-            if element.element_type in {"table", "image"}:
-                bucket = attachments.setdefault(
-                    text_chunk_index, {"table_element_ids": [], "image_element_ids": []}
-                )
-                if element.element_type == "table":
-                    bucket["table_element_ids"].append(element.element_id)
-                else:
-                    bucket["image_element_ids"].append(element.element_id)
+def _build_doc_element_resource_uri_map(
+    document: Any,
+    resource_entries: list[dict[str, Any]],
+) -> dict[str, str]:
+    element_to_uri: dict[str, str] = {}
+    for entry in resource_entries:
+        if entry.get("doc_id") != document.doc_id:
             continue
-        if element.element_type not in {"table", "image"}:
+        element_id = entry.get("element_id")
+        uri = entry.get("uri")
+        if not element_id or not uri:
             continue
-        target_chunk_index = last_text_chunk_by_context.get(context)
-        if target_chunk_index is None:
-            continue
-        bucket = attachments.setdefault(
-            target_chunk_index, {"table_element_ids": [], "image_element_ids": []}
-        )
-        if element.element_type == "table":
-            bucket["table_element_ids"].append(element.element_id)
-        if element.element_type == "image":
-            bucket["image_element_ids"].append(element.element_id)
+        element_to_uri[element_id] = uri
+    return element_to_uri
 
-    compact: dict[int, dict[str, list[str]]] = {}
-    for chunk_index, bucket in attachments.items():
-        payload = {key: value for key, value in bucket.items() if value}
-        if payload:
-            compact[chunk_index] = payload
-    return compact
+
+def _chunk_related_resource_uris(
+    chunk: Chunk,
+    element_to_resource_uri: dict[str, str],
+) -> list[str]:
+    uris: list[str] = []
+    for element_id in chunk.source_element_ids:
+        resource_uri = element_to_resource_uri.get(element_id)
+        if (
+            resource_uri
+            and ("#image-" in resource_uri or "#table-" in resource_uri)
+            and resource_uri not in uris
+        ):
+            uris.append(resource_uri)
+    return uris
+
+
+def _resource_metadata_for_chunk(chunk: Chunk, document: Any) -> dict[str, list[str]]:
+    image_ids = {e.element_id for e in document.elements if e.element_type == "image"}
+    table_ids = {e.element_id for e in document.elements if e.element_type == "table"}
+
+    metadata = {
+        "table_element_ids": [eid for eid in chunk.source_element_ids if eid in table_ids],
+        "image_element_ids": [eid for eid in chunk.source_element_ids if eid in image_ids],
+    }
+    return {k: v for k, v in metadata.items() if v}
 
 
 def _stable_doc_id(relative_path: str) -> str:

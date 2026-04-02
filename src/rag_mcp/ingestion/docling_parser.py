@@ -4,6 +4,7 @@ import dataclasses
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,15 @@ _ELEMENT_CACHE_VERSION  = "2"  # bump when parse/filter logic changes
 _PIPELINE_VERSION       = "2"  # bump when PdfPipelineOptions change
 
 
+@dataclass(frozen=True)
+class _TocRange:
+    level: int
+    title: str
+    heading_path: str
+    page_start: int
+    page_end: int
+
+
 def parse_document_file(
     path: Path,
     root_dir: Path,
@@ -40,6 +50,7 @@ def parse_document_file(
     file_type = path.suffix.lower().lstrip(".")
     doc_id = hashlib.sha1(relative_path.encode("utf-8")).hexdigest()[:16]
     title = path.name
+    metadata: dict[str, Any] = {}
 
     if file_type == "md":
         elements = _parse_markdown_elements(path.read_text(encoding="utf-8"), title)
@@ -50,6 +61,9 @@ def parse_document_file(
         if assets_dir is None:
             assets_dir = root_dir / "assets" / doc_id
         elements = _parse_pdf_elements(path, title, doc_id, assets_dir)
+        md_path = assets_dir / f"{path.stem}.md"
+        if md_path.exists():
+            metadata["pdf_markdown_path"] = str(md_path)
     else:
         raise ValueError(f"unsupported file type: {file_type}")
 
@@ -59,6 +73,7 @@ def parse_document_file(
         relative_path=relative_path,
         file_type=file_type,
         elements=elements,
+        metadata=metadata,
     )
 
 
@@ -101,13 +116,24 @@ def _parse_pdf_elements(
     assets_dir: Path,
 ) -> list[Element]:
     dl_doc = _load_dl_doc(path)
+    _save_pdf_markdown(dl_doc, path, assets_dir)
+    toc_ranges = _extract_pdf_toc_ranges(path)
 
     elements: list[Element] = []
-    heading_stack: list[str] = [title]
     image_n = 0
 
     for item, _level in dl_doc.iterate_items():
         label_val = getattr(item.label, "value", str(item.label))
+        prov_meta = _prov_metadata(item)
+        page_no = int(prov_meta.get("page_number", 0) or 0)
+        toc_ctx = _toc_context_for_page(page_no, toc_ranges)
+        if toc_ctx is None:
+            # Strict mode: only keep elements that can be mapped to TOC ranges.
+            continue
+
+        ctx_heading_path = toc_ctx.heading_path
+        ctx_section_title = toc_ctx.title
+        ctx_section_level = toc_ctx.level
 
         if label_val in _Label.SKIP:
             continue
@@ -116,26 +142,20 @@ def _parse_pdf_elements(
             text = getattr(item, "text", "").strip()
             if not text:
                 continue
-            level = _heading_level(label_val, text)
-            # Trim stack to current level and push new heading
-            heading_stack = heading_stack[:level]
-            heading_stack.append(text)
             elements.append(
                 Element(
                     element_id=f"el-{len(elements)}",
                     element_type="heading",
                     text=text,
-                    heading_path=" > ".join(heading_stack),
-                    section_title=text,
-                    section_level=level,
-                    metadata=_prov_metadata(item),
+                    heading_path=ctx_heading_path,
+                    section_title=ctx_section_title,
+                    section_level=ctx_section_level,
+                    metadata=prov_meta,
                 )
             )
             continue
 
         if label_val in _Label.TABLE:
-            if label_val == "document_index":
-                continue
             md = item.export_to_markdown(dl_doc) if hasattr(item, "export_to_markdown") else ""
             caption = _caption_text(item, dl_doc)
             meta: dict[str, Any] = {
@@ -149,9 +169,9 @@ def _parse_pdf_elements(
                     element_id=f"el-{len(elements)}",
                     element_type="table",
                     text=md,
-                    heading_path=" > ".join(heading_stack),
-                    section_title=heading_stack[-1] if heading_stack else title,
-                    section_level=len(heading_stack) - 1,
+                    heading_path=ctx_heading_path,
+                    section_title=ctx_section_title,
+                    section_level=ctx_section_level,
                     metadata=meta,
                 )
             )
@@ -171,9 +191,9 @@ def _parse_pdf_elements(
                     element_id=f"el-{len(elements)}",
                     element_type="image",
                     text=caption,
-                    heading_path=" > ".join(heading_stack),
-                    section_title=heading_stack[-1] if heading_stack else title,
-                    section_level=len(heading_stack) - 1,
+                    heading_path=ctx_heading_path,
+                    section_title=ctx_section_title,
+                    section_level=ctx_section_level,
                     metadata=meta,
                 )
             )
@@ -188,28 +208,98 @@ def _parse_pdf_elements(
                 element_id=f"el-{len(elements)}",
                 element_type="text",
                 text=text,
-                heading_path=" > ".join(heading_stack),
-                section_title=heading_stack[-1] if heading_stack else title,
-                section_level=max(0, len(heading_stack) - 1),
-                metadata=_prov_metadata(item),
+                heading_path=ctx_heading_path,
+                section_title=ctx_section_title,
+                section_level=ctx_section_level,
+                metadata=prov_meta,
             )
         )
-
-    if not elements:
-        elements = _single_text_element(text=title, heading_path=title, section_title=title)
 
     return elements
 
 
-def _heading_level(label_val: str, text: str) -> int:
-    if label_val == "title":
-        return 1
-    # Heuristic: detect numeric prefix like "1.2.3 "
-    import re
-    m = re.match(r'^(\d+(?:\.\d+)*)\s', text)
-    if m:
-        return len(m.group(1).split(".")) + 1
-    return 2
+def _save_pdf_markdown(dl_doc: DoclingDocument, pdf_path: Path, assets_dir: Path) -> Path | None:
+    """Export full PDF content to markdown when Docling exposes markdown export."""
+    export_md = getattr(dl_doc, "export_to_markdown", None)
+    if not callable(export_md):
+        return None
+
+    try:
+        markdown = export_md()
+    except Exception:
+        logger.warning("Docling markdown export failed: %s", pdf_path.name, exc_info=True)
+        return None
+
+    if not isinstance(markdown, str) or not markdown.strip():
+        return None
+
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    md_path = assets_dir / f"{pdf_path.stem}.md"
+    md_path.write_text(markdown, encoding="utf-8")
+    logger.debug("PDF markdown saved: %s", md_path)
+    return md_path
+
+
+def _extract_pdf_toc_ranges(pdf_path: Path) -> list[_TocRange]:
+    """Extract TOC nodes and their page ranges from PDF.
+
+    Returns empty list when fitz is unavailable or TOC is missing.
+    """
+    try:
+        import fitz  # PyMuPDF
+    except ImportError:
+        return []
+
+    try:
+        doc = fitz.open(str(pdf_path))
+        raw_toc = doc.get_toc()
+        total_pages = doc.page_count
+        doc.close()
+    except Exception:
+        return []
+
+    if not raw_toc:
+        return []
+
+    ranges: list[_TocRange] = []
+    ancestors: dict[int, str] = {}
+
+    for i, (level, raw_title, page_start) in enumerate(raw_toc):
+        title = (raw_title or "").strip()
+        if not title:
+            continue
+
+        ancestors[level] = title
+        for lvl in list(ancestors):
+            if lvl > level:
+                del ancestors[lvl]
+
+        heading_path = " > ".join(ancestors[lvl] for lvl in sorted(ancestors))
+        if i + 1 < len(raw_toc):
+            page_end = max(page_start, int(raw_toc[i + 1][2]) - 1)
+        else:
+            page_end = int(total_pages)
+
+        ranges.append(
+            _TocRange(
+                level=int(level),
+                title=title,
+                heading_path=heading_path,
+                page_start=int(page_start),
+                page_end=int(page_end),
+            )
+        )
+
+    return ranges
+
+
+def _toc_context_for_page(page_no: int, toc_ranges: list[_TocRange]) -> _TocRange | None:
+    if page_no <= 0 or not toc_ranges:
+        return None
+    for node in toc_ranges:
+        if node.page_start <= page_no <= node.page_end:
+            return node
+    return None
 
 
 def _table_data_json(item: Any) -> list[dict]:
@@ -394,6 +484,7 @@ def parse_document_file_cached(
             relative_path=raw["relative_path"],
             file_type=raw["file_type"],
             elements=elements,
+            metadata=raw.get("metadata", {}),
         )
 
     doc = parse_document_file(path, root_dir, assets_dir=assets_dir)

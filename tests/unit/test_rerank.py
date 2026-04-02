@@ -35,8 +35,8 @@ def _make_hits(n: int) -> list[dict]:
     ]
 
 
-def _hybrid_result(hits: list[dict]) -> dict:
-    return {"results": hits, "query": "q", "mode": "hybrid", "top_k": len(hits), "result_count": len(hits)}
+def _keyword_result(hits: list[dict]) -> dict:
+    return {"results": hits, "query": "q", "mode": "keyword", "top_k": len(hits), "result_count": len(hits)}
 
 
 # ── mode label ────────────────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ def test_rerank_returns_mode_rerank(tmp_path: Path) -> None:
     svc = _make_service(tmp_path, reranker=mock_reranker)
     with (
         patch("rag_mcp.retrieval.service.read_active_manifest", return_value=_fake_manifest(str(tmp_path))),
-        patch.object(svc, "_search_hybrid", return_value=_hybrid_result(_make_hits(3))),
+        patch.object(svc, "_search_keyword", return_value=_keyword_result(_make_hits(3))),
     ):
         result = svc.search(query="q", mode="rerank", top_k=3)
     assert result["mode"] == "rerank"
@@ -62,7 +62,7 @@ def test_rerank_respects_top_k(tmp_path: Path) -> None:
     svc = _make_service(tmp_path, reranker=mock_reranker)
     with (
         patch("rag_mcp.retrieval.service.read_active_manifest", return_value=_fake_manifest(str(tmp_path))),
-        patch.object(svc, "_search_hybrid", return_value=_hybrid_result(hits)),
+        patch.object(svc, "_search_keyword", return_value=_keyword_result(hits)),
     ):
         result = svc.search(query="q", mode="rerank", top_k=3)
     assert len(result["results"]) == 3
@@ -79,7 +79,7 @@ def test_rerank_sorts_by_reranker_score(tmp_path: Path) -> None:
     svc = _make_service(tmp_path, reranker=mock_reranker)
     with (
         patch("rag_mcp.retrieval.service.read_active_manifest", return_value=_fake_manifest(str(tmp_path))),
-        patch.object(svc, "_search_hybrid", return_value=_hybrid_result(original)),
+        patch.object(svc, "_search_keyword", return_value=_keyword_result(original)),
     ):
         result = svc.search(query="q", mode="rerank", top_k=4)
     uris = [r["uri"] for r in result["results"]]
@@ -88,11 +88,14 @@ def test_rerank_sorts_by_reranker_score(tmp_path: Path) -> None:
 
 # ── no reranker ───────────────────────────────────────────────────────────────
 
-def test_rerank_raises_when_no_reranker(tmp_path: Path) -> None:
-    from rag_mcp.errors import ServiceException
+def test_rerank_falls_back_to_keyword_when_no_reranker(tmp_path: Path) -> None:
+    hits = _make_hits(5)
     svc = _make_service(tmp_path, reranker=None)
-    with pytest.raises(ServiceException):
-        svc.search(query="q", mode="rerank", top_k=5)
+    with patch.object(svc, "_search_keyword", return_value=_keyword_result(hits)):
+        result = svc.search(query="q", mode="rerank", top_k=3)
+    assert result["mode"] == "rerank"
+    assert len(result["results"]) == 3
+    assert result["results"][0]["uri"] == hits[0]["uri"]
 
 
 # ── ApiReranker ──────────────────────────────────────────────────────────────

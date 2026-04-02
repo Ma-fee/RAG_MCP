@@ -57,20 +57,20 @@ def test_assemble_text_combines_heading_and_text():
     assert "Some body text." in result
 
 
-def test_assemble_text_includes_table_markdown():
+def test_assemble_text_skips_table_markdown():
     elements = [
         _make_element("e1", "table", "", 1, extra_meta={"markdown": "| a | b |\n|---|---|\n| 1 | 2 |"}),
     ]
     result = _assemble_text(elements)
-    assert "| a | b |" in result
+    assert result == ""
 
 
-def test_assemble_text_falls_back_to_table_text_when_no_markdown():
+def test_assemble_text_skips_table_text_when_no_markdown():
     elements = [
         _make_element("e1", "table", "fallback text", 1),
     ]
     result = _assemble_text(elements)
-    assert "fallback text" in result
+    assert result == ""
 
 
 def test_assemble_text_skips_image_elements():
