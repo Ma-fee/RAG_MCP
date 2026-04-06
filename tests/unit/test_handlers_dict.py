@@ -151,4 +151,4 @@ def test_section_retrieval_invalid_title_returns_error(tmp_path: Path) -> None:
         filename="doc",
     )
     assert isinstance(result, dict)
-    assert result["error"] == "invalid_title"
+    assert result["error"] == "RESOURCE_NOT_FOUND"
