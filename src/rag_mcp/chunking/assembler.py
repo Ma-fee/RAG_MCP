@@ -95,7 +95,7 @@ def _group_text_segments(
         )
 
     for element in document.elements:
-        if element.element_type not in {"text", "list", "code_block", "heading", "table"}:
+        if element.element_type not in {"text", "list", "code_block", "heading", "table", "image"}:
             continue
         text = " ".join(element.text.split()).strip()
         if not text:

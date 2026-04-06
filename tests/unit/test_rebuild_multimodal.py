@@ -259,7 +259,7 @@ def test_rebuild_pdf_uses_toc_chunker_without_chunk_size_fallback(tmp_path: Path
     assert kw_store["entries"][0]["text"] == "toc chunk text"
 
 
-def test_rebuild_pdf_raises_when_toc_chunking_not_satisfied(tmp_path: Path) -> None:
+def test_rebuild_pdf_falls_back_when_toc_chunking_not_satisfied(tmp_path: Path) -> None:
     corpus_dir = tmp_path / "corpus"
     data_dir = tmp_path / "data"
     corpus_dir.mkdir(parents=True)
@@ -278,11 +278,12 @@ def test_rebuild_pdf_raises_when_toc_chunking_not_satisfied(tmp_path: Path) -> N
         patch("rag_mcp.indexing.rebuild.load_supported_documents", return_value=[pdf_doc]),
         patch("rag_mcp.indexing.rebuild.TocAwareChunker.chunk_document", return_value=[]),
     ):
-        with pytest.raises(RuntimeError, match="TOC chunking failed for PDF"):
-            rebuild_keyword_index(source_dir=corpus_dir, data_dir=data_dir)
+        result = rebuild_keyword_index(source_dir=corpus_dir, data_dir=data_dir)
+    assert result["document_count"] == 1
+    assert result["chunk_count"] == 0
 
 
-def test_rebuild_rejects_non_pdf_in_toc_only_mode(tmp_path: Path) -> None:
+def test_rebuild_accepts_non_pdf_with_fallback_chunking(tmp_path: Path) -> None:
     corpus_dir = tmp_path / "corpus"
     data_dir = tmp_path / "data"
     corpus_dir.mkdir(parents=True)
@@ -292,12 +293,12 @@ def test_rebuild_rejects_non_pdf_in_toc_only_mode(tmp_path: Path) -> None:
         title="doc.md",
         relative_path="doc.md",
         file_type="md",
-        text="hello",
+        text="hello world this content is definitely long enough",
         elements=[
             Element(
                 element_id="el-0",
                 element_type="text",
-                text="hello",
+                text="hello world this content is definitely long enough",
                 heading_path="doc.md",
                 section_title="doc.md",
                 section_level=0,
@@ -306,5 +307,6 @@ def test_rebuild_rejects_non_pdf_in_toc_only_mode(tmp_path: Path) -> None:
     )
 
     with patch("rag_mcp.indexing.rebuild.load_supported_documents", return_value=[md_doc]):
-        with pytest.raises(RuntimeError, match="TOC-only indexing supports PDF only"):
-            rebuild_keyword_index(source_dir=corpus_dir, data_dir=data_dir)
+        result = rebuild_keyword_index(source_dir=corpus_dir, data_dir=data_dir)
+    assert result["document_count"] == 1
+    assert result["chunk_count"] >= 1

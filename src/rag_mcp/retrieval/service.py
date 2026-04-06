@@ -5,7 +5,12 @@ from typing import Any
 
 from rag_mcp.errors import ErrorCode, ServiceError, ServiceException
 from rag_mcp.indexing.keyword_index import KeywordIndex
-from rag_mcp.indexing.manifest import read_active_manifest
+from rag_mcp.indexing.repositories import (
+    ActiveIndexRepository,
+    RepositoryFormatError,
+    RepositoryNotFoundError,
+)
+from rag_mcp.retrieval.models import SearchHit
 
 
 class RetrievalService:
@@ -19,6 +24,7 @@ class RetrievalService:
         self.data_dir = Path(data_dir)
         self._reranker = reranker
         self._rerank_top_k_candidates = rerank_top_k_candidates
+        self.active_indexes = ActiveIndexRepository(self.data_dir)
 
     def search(
         self,
@@ -34,13 +40,13 @@ class RetrievalService:
         keyword_index = KeywordIndex.load(Path(manifest["index_dir"]))
         raw_hits = keyword_index.search(query, top_k=top_k)
         results = [
-            {
-                "text": hit["text"],
-                "title": hit["title"],
-                "uri": hit["uri"],
-                "score": hit["score"],
-                "metadata": hit["metadata"],
-            }
+            SearchHit(
+                uri=hit["uri"],
+                text=hit["text"],
+                title=hit["title"],
+                score=hit["score"],
+                metadata=hit["metadata"],
+            ).to_dict()
             for hit in raw_hits
         ]
         return {
@@ -80,3 +86,10 @@ class RetrievalService:
             "result_count": len(results),
             "results": results,
         }
+
+
+def read_active_manifest(manifest_path: Path) -> dict[str, Any] | None:
+    try:
+        return ActiveIndexRepository(Path(manifest_path).parent).load()
+    except (RepositoryNotFoundError, RepositoryFormatError):
+        return None
