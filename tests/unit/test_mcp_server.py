@@ -13,6 +13,12 @@ def _make_handlers() -> MagicMock:
     h.index_status.return_value = {"has_active_index": False}
     h.search.return_value = {"mode": "keyword", "result_count": 0, "results": []}
     h.read_resource.return_value = {"uri": "rag://corpus/c/d#text-0", "type": "text", "text": "hello"}
+    h.read_resources.return_value = {
+        "count": 1,
+        "success_count": 1,
+        "error_count": 0,
+        "results": [{"uri": "rag://corpus/c/d#text-0", "ok": True, "resource": {"uri": "rag://corpus/c/d#text-0"}}],
+    }
     h.list_filenames.return_value = {"count": 1, "filenames": [{"filename": "doc", "relative_path": "doc.pdf", "file_type": "pdf", "chunk_count": 3}]}
     h.list_sections.return_value = {"filename": "doc", "section_count": 1, "sections": [{"title": "1 前言"}]}
     h.section_retrieval.return_value = {"result_count": 1, "results": [{"uri": "rag://corpus/c/d#text-0", "title": "1 前言", "text": "..."}]}
@@ -32,6 +38,7 @@ def test_mcp_server_registers_four_tools() -> None:
     assert "rag_rebuild_index" in tool_names
     assert "rag_search" in tool_names
     assert "rag_read_resource" in tool_names
+    assert "rag_read_resources" in tool_names
     assert "rag_index_status" in tool_names
     assert "rag_list_filenames" in tool_names
     assert "rag_list_sections" in tool_names
@@ -64,6 +71,14 @@ async def test_mcp_server_read_resource_calls_handler() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mcp_server_read_resources_calls_handler() -> None:
+    handlers = _make_handlers()
+    mcp = create_mcp_server(handlers)
+    await mcp.call_tool("rag_read_resources", {"uris": ["rag://corpus/c/d#text-0"]})
+    handlers.read_resources.assert_called_once_with(uris=["rag://corpus/c/d#text-0"])
+
+
+@pytest.mark.asyncio
 async def test_mcp_server_list_filenames_calls_handler() -> None:
     handlers = _make_handlers()
     mcp = create_mcp_server(handlers)
@@ -86,15 +101,11 @@ async def test_mcp_server_section_retrieval_calls_handler() -> None:
     await mcp.call_tool(
         "rag_section_retrieval",
         {
-            "title": ["1 前言"],
+            "section_title": ["1 前言"],
             "filename": "doc",
-            "description": "前言",
-            "top_k": 2,
         },
     )
     handlers.section_retrieval.assert_called_once_with(
-        title=["1 前言"],
+        section_title=["1 前言"],
         filename="doc",
-        description="前言",
-        top_k=2,
     )

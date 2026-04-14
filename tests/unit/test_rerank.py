@@ -48,9 +48,11 @@ def test_rerank_returns_mode_rerank(tmp_path: Path) -> None:
     with (
         patch("rag_mcp.retrieval.service.read_active_manifest", return_value=_fake_manifest(str(tmp_path))),
         patch.object(svc, "_search_keyword", return_value=_keyword_result(_make_hits(3))),
+        patch.object(svc, "_search_vector", return_value={"results": [], "result_count": 0}),
+        patch.object(svc, "_split_query_intent", return_value={"keyword_query": "qk", "vector_query": "qv"}),
     ):
-        result = svc.search(query="q", mode="rerank", top_k=3)
-    assert result["mode"] == "rerank"
+        result = svc.search(query="q", top_k=3)
+    assert result["mode"] == "hybrid_rerank"
 
 
 # ── top_k truncation ──────────────────────────────────────────────────────────
@@ -63,8 +65,10 @@ def test_rerank_respects_top_k(tmp_path: Path) -> None:
     with (
         patch("rag_mcp.retrieval.service.read_active_manifest", return_value=_fake_manifest(str(tmp_path))),
         patch.object(svc, "_search_keyword", return_value=_keyword_result(hits)),
+        patch.object(svc, "_search_vector", return_value={"results": [], "result_count": 0}),
+        patch.object(svc, "_split_query_intent", return_value={"keyword_query": "qk", "vector_query": "qv"}),
     ):
-        result = svc.search(query="q", mode="rerank", top_k=3)
+        result = svc.search(query="q", top_k=3)
     assert len(result["results"]) == 3
 
 
@@ -80,8 +84,10 @@ def test_rerank_sorts_by_reranker_score(tmp_path: Path) -> None:
     with (
         patch("rag_mcp.retrieval.service.read_active_manifest", return_value=_fake_manifest(str(tmp_path))),
         patch.object(svc, "_search_keyword", return_value=_keyword_result(original)),
+        patch.object(svc, "_search_vector", return_value={"results": [], "result_count": 0}),
+        patch.object(svc, "_split_query_intent", return_value={"keyword_query": "qk", "vector_query": "qv"}),
     ):
-        result = svc.search(query="q", mode="rerank", top_k=4)
+        result = svc.search(query="q", top_k=4)
     uris = [r["uri"] for r in result["results"]]
     assert uris == [h["uri"] for h in reversed_hits]
 
@@ -92,8 +98,12 @@ def test_rerank_falls_back_to_keyword_when_no_reranker(tmp_path: Path) -> None:
     hits = _make_hits(5)
     svc = _make_service(tmp_path, reranker=None)
     with patch.object(svc, "_search_keyword", return_value=_keyword_result(hits)):
-        result = svc.search(query="q", mode="rerank", top_k=3)
-    assert result["mode"] == "rerank"
+        with (
+            patch.object(svc, "_search_vector", return_value={"results": [], "result_count": 0}),
+            patch.object(svc, "_split_query_intent", return_value={"keyword_query": "qk", "vector_query": "qv"}),
+        ):
+            result = svc.search(query="q", top_k=3)
+    assert result["mode"] == "hybrid_rerank"
     assert len(result["results"]) == 3
     assert result["results"][0]["uri"] == hits[0]["uri"]
 

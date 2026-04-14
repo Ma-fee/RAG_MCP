@@ -116,7 +116,7 @@ def _parse_pdf_elements(
     assets_dir: Path,
 ) -> list[Element]:
     dl_doc = _load_dl_doc(path)
-    _save_pdf_markdown(dl_doc, path, assets_dir)
+    # _save_pdf_markdown(dl_doc, path, assets_dir)
     toc_ranges = _extract_pdf_toc_ranges(path)
 
     elements: list[Element] = []

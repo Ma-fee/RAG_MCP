@@ -10,6 +10,7 @@ from typing import Any
 from rag_mcp.chunking.toc_chunker import TocAwareChunker
 from rag_mcp.indexing.keyword_index import persist_keyword_store
 from rag_mcp.indexing.manifest import read_active_manifest, write_active_manifest_atomic
+from rag_mcp.indexing.sections_mapping import build_sections_mapping
 from rag_mcp.indexing.resource_store import ResourceStore
 from rag_mcp.indexing.vector_index import VectorIndex
 from rag_mcp.ingestion.filesystem import load_supported_documents
@@ -34,7 +35,9 @@ def rebuild_keyword_index(
 
     corpus_id = _make_corpus_id(source_dir)
     temp_index_dir = index_root / f".tmp-{uuid.uuid4().hex}"
-    final_index_dir = index_root / f"idx-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
+    final_index_dir = (
+        index_root / f"idx-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
+    )
 
     try:
         result = _build_and_persist_keyword_store(
@@ -50,6 +53,7 @@ def rebuild_keyword_index(
         manifest = {
             "corpus_id": corpus_id,
             "index_dir": str(final_index_dir),
+            "source_dir": str(source_dir),
             "indexed_at": int(time.time()),
             "document_count": result["document_count"],
             "chunk_count": result["chunk_count"],
@@ -57,6 +61,16 @@ def rebuild_keyword_index(
             "embedding_dimension": result["embedding_dimension"],
         }
         write_active_manifest_atomic(active_manifest_path, manifest)
+
+        try:
+            build_sections_mapping(
+                data_dir=data_dir,
+                source_dir=source_dir,
+                index_dir=final_index_dir,
+            )
+        except Exception:
+            pass
+
     except Exception:
         if temp_index_dir.exists():
             shutil.rmtree(temp_index_dir, ignore_errors=True)
@@ -77,11 +91,15 @@ def _build_and_persist_keyword_store(
     min_chunk_length: int,
     embedding_provider: Any | None,
     vlm_client: Any | None = None,
-) -> dict[str, int]:
-    documents = sorted(load_supported_documents(source_dir), key=lambda item: item.relative_path)
+) -> dict[str, Any]:
+    documents = sorted(
+        load_supported_documents(source_dir), key=lambda item: item.relative_path
+    )
 
     # Build ResourceStore (image/table/text resource entries) for all documents
-    resource_store = ResourceStore(index_dir=index_dir, corpus_id=corpus_id, vlm_client=vlm_client)
+    resource_store = ResourceStore(
+        index_dir=index_dir, corpus_id=corpus_id, vlm_client=vlm_client
+    )
     all_resource_entries: list[dict[str, Any]] = []
     for doc in documents:
         all_resource_entries.extend(resource_store.build(doc))
@@ -90,7 +108,9 @@ def _build_and_persist_keyword_store(
     entries: list[dict[str, Any]] = []
     for doc in documents:
         stable_doc_id = _stable_doc_id(doc.relative_path)
-        doc_element_to_resource_uri = _build_doc_element_resource_uri_map(doc, all_resource_entries)
+        doc_element_to_resource_uri = _build_doc_element_resource_uri_map(
+            doc, all_resource_entries
+        )
         if doc.file_type != "pdf":
             raise RuntimeError(
                 f"TOC-only indexing supports PDF only, got {doc.file_type}: {doc.relative_path}"
@@ -114,7 +134,9 @@ def _build_and_persist_keyword_store(
             ) from exc
 
         for chunk in chunks:
-            chunk_uri = f"rag://corpus/{corpus_id}/{stable_doc_id}#text-{chunk.chunk_index}"
+            chunk_uri = (
+                f"rag://corpus/{corpus_id}/{stable_doc_id}#text-{chunk.chunk_index}"
+            )
             related_resource_uris = _chunk_related_resource_uris(
                 chunk=chunk,
                 element_to_resource_uri=doc_element_to_resource_uri,
@@ -154,6 +176,7 @@ def _build_and_persist_keyword_store(
 
     persist_keyword_store(index_dir=index_dir, corpus_id=corpus_id, entries=entries)
 
+    # Persist vector index for future vector/hybrid retrieval paths.
     if embedding_provider is not None and entries:
         vector_index = VectorIndex(index_dir=index_dir)
         vector_index.reset()
@@ -233,8 +256,12 @@ def _resource_metadata_for_chunk(chunk: Chunk, document: Any) -> dict[str, list[
     table_ids = {e.element_id for e in document.elements if e.element_type == "table"}
 
     metadata = {
-        "table_element_ids": [eid for eid in chunk.source_element_ids if eid in table_ids],
-        "image_element_ids": [eid for eid in chunk.source_element_ids if eid in image_ids],
+        "table_element_ids": [
+            eid for eid in chunk.source_element_ids if eid in table_ids
+        ],
+        "image_element_ids": [
+            eid for eid in chunk.source_element_ids if eid in image_ids
+        ],
     }
     return {k: v for k, v in metadata.items() if v}
 

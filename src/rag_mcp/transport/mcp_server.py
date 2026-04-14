@@ -25,6 +25,10 @@ def create_mcp_server(handlers: Any) -> fastmcp.FastMCP:
         return handlers.read_resource(uri=uri)
 
     @mcp.tool()
+    def rag_read_resources(uris: list[str]) -> dict:
+        return handlers.read_resources(uris=uris)
+
+    @mcp.tool()
     def rag_list_filenames() -> dict:
         return handlers.list_filenames()
 
@@ -34,16 +38,12 @@ def create_mcp_server(handlers: Any) -> fastmcp.FastMCP:
 
     @mcp.tool()
     def rag_section_retrieval(
-        title: list[str],
+        section_title: list[str],
         filename: str,
-        description: str = "",
-        top_k: int = 10,
     ) -> dict:
         return handlers.section_retrieval(
-            title=title,
+            section_title=section_title,
             filename=filename,
-            description=description,
-            top_k=top_k,
         )
 
     @mcp.resource("rag://corpus/{corpus_id}/{doc_id}#{fragment}")

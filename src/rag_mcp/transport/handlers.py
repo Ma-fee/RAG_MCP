@@ -59,15 +59,24 @@ class ToolHandlers:
         manifest = read_active_manifest(self.data_dir / "active_index.json")
         if manifest is None:
             return {"has_active_index": False}
+
+        filenames: list[str] = []
+        try:
+            grouped = self._group_entries_by_document()
+            filenames = sorted(grouped.keys())
+        except ServiceException:
+            filenames = []
+
         return {
             "has_active_index": True,
             "corpus_id": manifest["corpus_id"],
             "document_count": manifest["document_count"],
             "chunk_count": manifest["chunk_count"],
             "indexed_at": manifest["indexed_at"],
+            "filenames": filenames,
         }
 
-    def search(self, query: str, top_k: int = 5, mode: str | None = None) -> dict:
+    def search(self, query: str, top_k: int = 5) -> dict:
         try:
             return self.retrieval.search(query=query, top_k=top_k)
         except ServiceException as exc:
@@ -78,6 +87,42 @@ class ToolHandlers:
             return self.resources.read(uri)
         except ServiceException as exc:
             return {"error": exc.error.code.value, "message": exc.error.message}
+
+    def read_resources(self, uris: list[str]) -> dict:
+        if not uris:
+            return {
+                "count": 0,
+                "success_count": 0,
+                "error_count": 0,
+                "results": [],
+            }
+
+        results: list[dict[str, Any]] = []
+        success_count = 0
+        error_count = 0
+
+        for uri in uris:
+            try:
+                payload = self.resources.read(uri=uri)
+                results.append({"uri": uri, "ok": True, "resource": payload})
+                success_count += 1
+            except ServiceException as exc:
+                results.append(
+                    {
+                        "uri": uri,
+                        "ok": False,
+                        "error": exc.error.code.value,
+                        "message": exc.error.message,
+                    }
+                )
+                error_count += 1
+
+        return {
+            "count": len(uris),
+            "success_count": success_count,
+            "error_count": error_count,
+            "results": results,
+        }
 
     def list_filenames(self) -> dict:
         try:
@@ -101,41 +146,37 @@ class ToolHandlers:
         if not filename or not filename.strip():
             return {"error": "missing_filename", "message": "filename 不能为空"}
 
+        normalized_filename = filename.strip()
         try:
-            grouped = self._group_entries_by_document()
+            sections_mapping = self._load_sections_mapping()
         except ServiceException as exc:
             return {"error": exc.error.code.value, "message": exc.error.message}
 
-        normalized_filename = filename.strip()
-        doc_payload = grouped.get(normalized_filename)
-        if doc_payload is None:
+        sections = sections_mapping.get(normalized_filename)
+        if sections is None:
             return {
                 "error": "invalid_filename",
                 "message": f"未找到文档: {normalized_filename}",
             }
 
-        sections = self._extract_sections_from_entries(doc_payload["entries"])
-        return {
-            "filename": normalized_filename,
-            "relative_path": doc_payload["relative_path"],
-            "file_type": doc_payload["file_type"],
-            "section_count": len(sections),
-            "sections": sections,
-        }
+        return {normalized_filename: sections}
 
     def section_retrieval(
         self,
-        title: list[str],
+        section_title: list[str],
         filename: str,
-        description: str = "",
-        top_k: int = 10,
     ) -> dict:
         if not filename or not filename.strip():
             return {"error": "missing_filename", "message": "filename 不能为空"}
 
-        normalized_titles = [item.strip() for item in title if item and item.strip()]
+        normalized_titles = [
+            item.strip() for item in section_title if item and item.strip()
+        ]
         if not normalized_titles:
-            return {"error": "missing_title", "message": "title 不能为空"}
+            return {
+                "error": "missing_section_title",
+                "message": "section_title 不能为空",
+            }
 
         try:
             grouped = self._group_entries_by_document()
@@ -150,8 +191,15 @@ class ToolHandlers:
                 "message": f"未找到文档: {normalized_filename}",
             }
 
-        sections = self._extract_sections_from_entries(doc_payload["entries"])
-        valid_section_titles = {section["title"] for section in sections}
+        valid_section_titles = set()
+        try:
+            valid_section_titles = set(self._load_sections_mapping().get(normalized_filename, []))
+        except ServiceException:
+            valid_section_titles = {
+                section["title"]
+                for section in self._extract_sections_from_entries(doc_payload["entries"])
+            }
+
         invalid_titles = [item for item in normalized_titles if item not in valid_section_titles]
         if invalid_titles:
             return {
@@ -160,34 +208,57 @@ class ToolHandlers:
                 "invalid_titles": invalid_titles,
             }
 
-        matched_results = []
+        matched_results: list[dict[str, Any]] = []
         title_set = set(normalized_titles)
-        query = description.strip() if description.strip() else " ".join(normalized_titles)
+
+        # Build URI map from keyword store entries to enrich vector hits with related resources.
+        uri_to_entry = {
+            str(entry.get("uri", "")): entry
+            for entry in doc_payload["entries"]
+            if entry.get("uri")
+        }
+
         for entry in doc_payload["entries"]:
-            entry_title = str(entry.get("title", "")).strip()
-            if entry_title not in title_set:
+            metadata = entry.get("metadata", {})
+            entry_section_title = str(metadata.get("section_title", "")).strip()
+            if entry_section_title not in title_set:
                 continue
+
+            entry_uri = str(entry.get("uri", ""))
+            related_uris = uri_to_entry.get(entry_uri, {}).get(
+                "related_resource_uris", []
+            )
             matched_results.append(
                 {
+                    "filename": normalized_filename,
                     "uri": entry.get("uri"),
-                    "title": entry_title,
+                    "title": entry_section_title,
                     "text": entry.get("text", ""),
-                    "metadata": entry.get("metadata", {}),
-                    "related_resource_uris": entry.get("related_resource_uris", []),
+                    "metadata": metadata,
+                    "related_resource_uris": related_uris,
+                    "related_resources": self._resolve_related_resources(related_uris),
                 }
             )
 
         matched_results.sort(
             key=lambda item: int(item.get("metadata", {}).get("chunk_index", 0))
         )
-        limited = matched_results[: max(1, int(top_k))]
+
         return {
-            "query": query,
             "filename": normalized_filename,
-            "requested_titles": normalized_titles,
-            "result_count": len(limited),
-            "results": limited,
+            "requested_section_titles": normalized_titles,
+            "result_count": len(matched_results),
+            "results": matched_results,
         }
+
+    def _resolve_related_resources(self, related_uris: list[str]) -> list[dict[str, Any]]:
+        resolved: list[dict[str, Any]] = []
+        for uri in related_uris:
+            try:
+                resolved.append(self.resources.read(uri=uri))
+            except ServiceException:
+                continue
+        return resolved
 
     def _group_entries_by_document(self) -> dict[str, dict[str, Any]]:
         manifest = read_active_manifest(self.data_dir / "active_index.json")
@@ -236,7 +307,6 @@ class ToolHandlers:
         self,
         entries: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        seen = set()
         sections: list[dict[str, Any]] = []
 
         ordered_entries = sorted(
@@ -245,17 +315,56 @@ class ToolHandlers:
         )
         for entry in ordered_entries:
             metadata = entry.get("metadata", {})
-            title = str(entry.get("title", "")).strip()
-            if not title or title in seen:
+            section_title = str(metadata.get("section_title", "")).strip()
+            heading_path = str(metadata.get("heading_path", "")).strip()
+            title = section_title or heading_path or str(entry.get("title", "")).strip()
+            if not title:
                 continue
-            seen.add(title)
+
             sections.append(
                 {
                     "title": title,
-                    "heading_path": metadata.get("heading_path", ""),
-                    "section_title": metadata.get("section_title", title),
+                    "heading_path": heading_path,
+                    "section_title": section_title or title,
                     "section_level": metadata.get("section_level", 0),
                 }
             )
 
         return sections
+
+    def _load_sections_mapping(self) -> dict[str, list[str]]:
+        manifest = read_active_manifest(self.data_dir / "active_index.json")
+        if manifest is None:
+            raise ServiceException(
+                ServiceError(
+                    code=ErrorCode.NO_ACTIVE_INDEX,
+                    message="当前没有活动索引",
+                    hint="请先调用 rag_rebuild_index",
+                )
+            )
+
+        index_dir = Path(manifest["index_dir"])
+        mapping_path = index_dir / "sections_mapping.json"
+        if not mapping_path.exists():
+            raise ServiceException(
+                ServiceError(
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
+                    message="未找到 sections_mapping.json",
+                    hint="请先运行 sections mapping 构建脚本",
+                )
+            )
+
+        payload = json.loads(mapping_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ServiceException(
+                ServiceError(
+                    code=ErrorCode.RESOURCE_NOT_FOUND,
+                    message="sections_mapping.json 格式无效",
+                    hint="请重新运行 sections mapping 构建脚本",
+                )
+            )
+        return {
+            str(k): [str(item) for item in v]
+            for k, v in payload.items()
+            if isinstance(v, list)
+        }

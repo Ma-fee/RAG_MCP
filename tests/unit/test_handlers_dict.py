@@ -30,6 +30,16 @@ def test_index_status_returns_dict(tmp_path: Path) -> None:
     assert "has_active_index" in result
 
 
+def test_index_status_contains_filenames(tmp_path: Path) -> None:
+    _write_active_keyword_store(tmp_path)
+    h = _make_handlers(tmp_path)
+    result = h.index_status()
+    assert isinstance(result, dict)
+    assert result["has_active_index"] is True
+    assert "filenames" in result
+    assert "doc" in result["filenames"]
+
+
 def test_search_returns_dict(tmp_path: Path) -> None:
     h = _make_handlers(tmp_path)
     mock_retrieval = MagicMock()
@@ -58,6 +68,23 @@ def test_read_resource_returns_dict(tmp_path: Path) -> None:
     assert "uri" in result or "error" in result
 
 
+def test_read_resources_returns_dict(tmp_path: Path) -> None:
+    h = _make_handlers(tmp_path)
+    mock_resources = MagicMock()
+    mock_resources.read.return_value = {
+        "uri": "rag://corpus/c/d#text-0",
+        "type": "text",
+        "text": "hello",
+        "metadata": {},
+    }
+    h.resources = mock_resources
+    result = h.read_resources(uris=["rag://corpus/c/d#text-0"])
+    assert isinstance(result, dict)
+    assert result["count"] == 1
+    assert result["success_count"] == 1
+    assert result["error_count"] == 0
+
+
 def _write_active_keyword_store(tmp_path: Path) -> None:
     index_dir = tmp_path / "indexes" / "idx-test"
     index_dir.mkdir(parents=True, exist_ok=True)
@@ -66,6 +93,7 @@ def _write_active_keyword_store(tmp_path: Path) -> None:
             {
                 "corpus_id": "c1",
                 "index_dir": str(index_dir),
+                "source_dir": str(tmp_path / "corpus"),
                 "indexed_at": 0,
                 "document_count": 1,
                 "chunk_count": 2,
@@ -78,7 +106,7 @@ def _write_active_keyword_store(tmp_path: Path) -> None:
         "entries": [
             {
                 "text": "A",
-                "title": "1 前言",
+                "title": "manual.pdf",
                 "uri": "rag://corpus/c1/d1#text-0",
                 "metadata": {
                     "relative_path": "manuals/doc.pdf",
@@ -92,7 +120,7 @@ def _write_active_keyword_store(tmp_path: Path) -> None:
             },
             {
                 "text": "B",
-                "title": "1.1 安全",
+                "title": "manual.pdf",
                 "uri": "rag://corpus/c1/d1#text-1",
                 "metadata": {
                     "relative_path": "manuals/doc.pdf",
@@ -109,6 +137,11 @@ def _write_active_keyword_store(tmp_path: Path) -> None:
     (index_dir / "keyword_store.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    (index_dir / "sections_mapping.json").write_text(
+        json.dumps({"doc": ["1 前言", "1.1 安全"]}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
 
 
 def test_list_filenames_returns_dict(tmp_path: Path) -> None:
@@ -125,29 +158,44 @@ def test_list_sections_returns_dict(tmp_path: Path) -> None:
     h = _make_handlers(tmp_path)
     result = h.list_sections("doc")
     assert isinstance(result, dict)
-    assert result["section_count"] == 2
-    assert result["sections"][0]["title"] == "1 前言"
+    assert "doc" in result
+    assert result["doc"] == ["1 前言", "1.1 安全"]
+
+
+def test_list_sections_returns_error_when_mapping_missing(tmp_path: Path) -> None:
+    _write_active_keyword_store(tmp_path)
+    index_dir = tmp_path / "indexes" / "idx-test"
+    (index_dir / "sections_mapping.json").unlink()
+    h = _make_handlers(tmp_path)
+    result = h.list_sections("doc")
+    assert isinstance(result, dict)
+    assert result["error"] == "RESOURCE_NOT_FOUND"
+def test_list_sections_returns_error_when_filename_missing(tmp_path: Path) -> None:
+    _write_active_keyword_store(tmp_path)
+    h = _make_handlers(tmp_path)
+    result = h.list_sections("missing")
+    assert isinstance(result, dict)
+    assert result["error"] == "invalid_filename"
 
 
 def test_section_retrieval_returns_dict(tmp_path: Path) -> None:
     _write_active_keyword_store(tmp_path)
     h = _make_handlers(tmp_path)
     result = h.section_retrieval(
-        title=["1.1 安全"],
+        section_title=["1.1 安全"],
         filename="doc",
-        description="安全",
-        top_k=5,
     )
     assert isinstance(result, dict)
     assert result["result_count"] == 1
     assert result["results"][0]["title"] == "1.1 安全"
+    assert result["results"][0]["filename"] == "doc"
 
 
 def test_section_retrieval_invalid_title_returns_error(tmp_path: Path) -> None:
     _write_active_keyword_store(tmp_path)
     h = _make_handlers(tmp_path)
     result = h.section_retrieval(
-        title=["不存在章节"],
+        section_title=["不存在章节"],
         filename="doc",
     )
     assert isinstance(result, dict)
